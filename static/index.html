@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpportunityHub — Find every student opportunity in one place</title>
+<link rel="stylesheet" href="/static/styles.css" />
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>" />
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased">
+
+<!-- ================= LOADING SPLASH ================= -->
+<div id="splash" class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-slate-950">
+  <div class="text-5xl animate-bounce">🎓</div>
+  <p class="text-sm text-slate-400 animate-pulse">Loading opportunities…</p>
+</div>
+
+<header class="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
+  <div class="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
+    <a href="#/discover" class="flex items-center gap-2 font-bold text-lg">
+      <span>🎓</span><span class="bg-gradient-to-r from-violet-400 to-cyan-300 bg-clip-text text-transparent">OpportunityHub</span>
+    </a>
+
+    <nav class="ml-2 flex gap-1 text-sm" id="nav">
+      <a href="#/discover" data-nav="discover" class="navlink">Discover</a>
+      <a href="#/dashboard" data-nav="dashboard" class="navlink">Dashboard</a>
+      <a href="#/saved" data-nav="saved" class="navlink">Saved</a>
+      <a href="#/profile" data-nav="profile" class="navlink">Profile</a>
+    </nav>
+
+    <div class="ml-auto flex items-center gap-2 text-sm">
+      <span id="whoami" class="hidden rounded-full border border-slate-700 px-3 py-1 text-slate-300 sm:inline"></span>
+      <button id="btn-demo" class="rounded-lg bg-violet-600 px-3 py-1.5 font-semibold hover:bg-violet-500">Load demo profile</button>
+    </div>
+  </div>
+</header>
+
+<main id="view" class="mx-auto max-w-7xl px-4 py-6"></main>
+
+<footer class="border-t border-slate-800 py-8 text-center text-xs text-slate-500">
+  <p>OpportunityHub — built solo for FITFEST 2026 · Flora Institute of Technology, Pune</p>
+  <p class="mt-1">GDG FIT Pune · #FITFEST2026 #SOLOHACKATHON</p>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

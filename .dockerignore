@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.json
+!package.json
+.git/
+.gitignore
+README.md
+*.md
+.vscode/
+.idea/

@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.db
+.vscode/
+.idea/
+.DS_Store
+
+# Never commit GCP credentials -- Cloud Run uses ADC, no key file is needed.
+*service-account*.json
+*-key.json
+gcloud-*.json
