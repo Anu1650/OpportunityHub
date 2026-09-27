@@ -1,8 +1,9 @@
 /* Auth screens: landing -> signup -> OTP -> app, plus login / forgot / reset.
-   Kept separate from app.js so the discovery SPA stays untouched. */
+   Kept separate from app.js so the discovery SPA stays untouched.
+   These render into the shared `view` element defined in app.js, which loads
+   first -- do not re-declare it here. */
 
 const A = {
-  view: null,
   mode: "landing",      // landing | login | signup | otp | forgot | reset
   email: "",
   name: "",
@@ -35,7 +36,7 @@ function alertBox(msg, tone = "error") {
 
 /* ---------------------------------------------------------------- landing */
 function renderLanding() {
-  A.view.innerHTML = `
+  view.innerHTML = `
   <div class="overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-b from-violet-950/40 to-slate-950">
     <div class="px-6 py-14 text-center sm:px-12">
       <div class="text-5xl">🎓</div>
@@ -86,7 +87,7 @@ function renderLanding() {
 
 /* ------------------------------------------------------------------ login */
 function renderLogin() {
-  A.view.innerHTML = shell(`
+  view.innerHTML = shell(`
     <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <h2 class="text-xl font-bold">Welcome back</h2>
       <p class="mt-1 text-sm text-slate-400">Log in to your OpportunityHub account.</p>
@@ -106,7 +107,7 @@ function renderLogin() {
 
 /* ----------------------------------------------------------------- signup */
 function renderSignup() {
-  A.view.innerHTML = shell(`
+  view.innerHTML = shell(`
     <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <h2 class="text-xl font-bold">Create your account</h2>
       <p class="mt-1 text-sm text-slate-400">We'll email you a 6-digit code to verify your address.</p>
@@ -124,7 +125,7 @@ function renderSignup() {
 
 /* -------------------------------------------------------------------- OTP */
 function renderOtp() {
-  A.view.innerHTML = shell(`
+  view.innerHTML = shell(`
     <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <h2 class="text-xl font-bold">Verify your email</h2>
       <p class="mt-1 text-sm text-slate-400">
@@ -147,7 +148,7 @@ function renderOtp() {
 }
 /* ----------------------------------------------------------------- forgot */
 function renderForgot() {
-  A.view.innerHTML = shell(`
+  view.innerHTML = shell(`
     <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <h2 class="text-xl font-bold">Reset your password</h2>
       <p class="mt-1 text-sm text-slate-400">Enter your email and we'll send a reset link.</p>
@@ -163,7 +164,7 @@ function renderForgot() {
 
 /* ------------------------------------------------------------------ reset */
 function renderReset(token) {
-  A.view.innerHTML = shell(`
+  view.innerHTML = shell(`
     <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <h2 class="text-xl font-bold">Choose a new password</h2>
       <form id="resetForm" class="mt-5 space-y-3">

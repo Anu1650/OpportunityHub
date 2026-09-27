@@ -665,7 +665,11 @@ document.addEventListener("click", async (e) => {
   }
 });
 
-(async function boot() {
+// Deferred to DOMContentLoaded on purpose. This file references `A` and
+// `paintAuth()` from auth.js, which is the script that loads *after* this one.
+// Running on DOMContentLoaded guarantees both files have been parsed first,
+// instead of relying on network awaits to yield the event loop in time.
+document.addEventListener("DOMContentLoaded", async function boot() {
   try {
     state.meta = await api("/meta");
 
@@ -687,9 +691,24 @@ document.addEventListener("click", async (e) => {
       showAuth();
     }
   } catch (e) {
-    view.innerHTML = `<div class="rounded-xl border border-rose-500/40 p-6 text-sm text-rose-300">
-      Could not reach the API: ${esc(e.message)}</div>`;
+    // This block also catches frontend bugs, not just API failures. Blaming
+    // the API for every error sent debugging in the wrong direction before, so
+    // report what actually happened and name the failing stage.
+    const offline = !navigator.onLine;
+    const head = offline
+      ? "You appear to be offline."
+      : "The app failed to start.";
+    view.innerHTML = `<div class="rounded-xl border border-rose-500/40 p-6">
+      <p class="text-sm font-semibold text-rose-300">${head}</p>
+      <p class="mt-2 text-xs text-slate-400">Error: <code class="text-slate-300">${esc(e.message)}</code></p>
+      <p class="mt-2 text-xs text-slate-500">If the API is reachable, open the console (F12) for the full trace,
+         then reload. Try the sign-in link below if you already have an account.</p>
+      <div class="mt-4 flex gap-2">
+        <button data-amode="login" class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold hover:border-violet-500">Log in</button>
+        <button data-amode="signup" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold hover:bg-violet-500">Create account</button>
+      </div>
+    </div>`;
   } finally {
     $("#splash")?.remove();
   }
-})();
+});

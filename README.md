@@ -290,12 +290,21 @@ Interactive docs: **`/docs`** · schema: `/openapi.json`
 ## Tests
 
 ```bash
-.\.venv\Scripts\python.exe tests\test_eligibility.py
+.\.venv\Scripts\python.exe tests\test_eligibility.py   # parser unit tests
+.\.venv\Scripts\python.exe tests\test_frontend.py      # static JS/HTML checks
+.\.venv\Scripts\python.exe tests\verify_served.py      # asserts on served assets (server must be up)
 ```
 
-16 assertions covering year-of-study parsing and eligibility derivation,
-including the cases that are easy to get wrong: `"2nd-4th year"` (a range, so the
-minimum is 2), `"Final-year"`, and `"Postgraduate students only"`.
+`test_frontend.py` exists because of a bug that passed every API test: a render
+function wrote to a field initialised to `null` and never assigned, so **all**
+auth screens threw on load. It is invisible to HTTP testing — it only happens in
+a browser. These checks are the cheapest substitute for having one: every id the
+JS looks up must exist, no render path may write through an unassigned field,
+and the script load order must hold.
+
+`test_eligibility.py` covers year-of-study parsing including the cases that are
+easy to get wrong: `"2nd-4th year"` (a range, so the minimum is 2), `"Final-year"`,
+and `"Postgraduate students only"`.
 
 ## Scope & limitations
 
