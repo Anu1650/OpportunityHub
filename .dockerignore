@@ -11,3 +11,11 @@ README.md
 *.md
 .vscode/
 .idea/
+tools/
+data/
+server.log
+server.err
+tunnel.log
+tunnel.err
+public-url.txt
+tests/

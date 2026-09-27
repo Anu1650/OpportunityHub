@@ -11,9 +11,12 @@ opportunity collection. Listings are read-only reference data, so caching
 them keeps read volume near zero no matter how many judges browse.
 """
 
+import json
 import logging
+import os
 import threading
 import time
+import uuid
 from typing import Dict, List, Optional
 
 from . import config
@@ -28,8 +31,6 @@ def _norm(value) -> str:
 
 def _next_object_id() -> str:
     """Readable, collision-resistant id without needing bson at import time."""
-    import uuid
-
     return uuid.uuid4().hex[:12]
 
 
@@ -295,6 +296,136 @@ class MemoryStore(BaseStore):
         self.bookmarks.pop(f"{student_id}:{opportunity_id}", None)
 
 
+class FileStore(BaseStore):
+    """JSON-file backend for a laptop or VM deployment.
+
+    This is what makes a Cloudflare-tunnel setup usable: MemoryStore loses
+    every account and bookmark the moment the process restarts, which on a
+    laptop-hosted demo means a judge sees an empty app.
+
+    Deliberately NOT for Cloud Run -- the container filesystem there is
+    ephemeral, so a file is wiped on every restart and scale event. Use
+    Firestore or MongoDB when deployed there.
+    """
+
+    def __init__(self, data_dir: str) -> None:
+        super().__init__()
+        self.dir = data_dir
+        os.makedirs(self.dir, exist_ok=True)
+        self._flock = threading.RLock()
+
+        self.students: Dict[str, dict] = self._load("students.json")
+        self.opportunities: Dict[str, dict] = self._load("opportunities.json")
+        self.bookmarks: Dict[str, dict] = self._load("bookmarks.json")
+        self._auth: Dict[str, Dict[str, dict]] = self._load("auth.json")
+        log.info("file store at %s", os.path.abspath(self.dir))
+
+    # ---- persistence -----------------------------------------------------
+    def _path(self, name: str) -> str:
+        return os.path.join(self.dir, name)
+
+    def _load(self, name: str) -> dict:
+        path = self._path(name)
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (json.JSONDecodeError, OSError) as exc:
+            # Never crash on boot because of a bad file -- that would take the
+            # whole site down. Quarantine it and carry on.
+            log.error("could not read %s (%s); moving it aside", path, exc)
+            try:
+                os.replace(path, path + ".corrupt")
+            except OSError:
+                pass
+            return {}
+
+    def _save(self, name: str, payload: dict) -> None:
+        # Write to a temp file then replace, so a crash mid-write cannot leave
+        # a truncated file that fails to parse on the next boot.
+        tmp = self._path(name) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+        os.replace(tmp, self._path(name))
+
+    def _next_id(self, prefix: str) -> str:
+        # uuid, not a counter: a counter restarts at 1 in a fresh data
+        # directory and would collide with ids already in bookmark keys.
+        return f"{prefix}{uuid.uuid4().hex[:12]}"
+
+    # ---- seeding ---------------------------------------------------------
+    def seed(self, rows: List[dict]) -> int:
+        if self.opportunities:
+            return 0
+        with self._flock:
+            for row in rows:
+                row = dict(row)
+                row.setdefault("id", self._next_id("opp"))
+                self.opportunities[row["id"]] = row
+            self._save("opportunities.json", self.opportunities)
+        self.invalidate_cache()
+        return len(rows)
+
+    # ---- listings / students --------------------------------------------
+    def _list_opportunities(self) -> List[dict]:
+        return [dict(v, id=k) for k, v in self.opportunities.items()]
+
+    def _list_students(self) -> List[dict]:
+        return [dict(v, id=k) for k, v in self.students.items()]
+
+    def _put_student(self, student: dict) -> dict:
+        with self._flock:
+            sid = student.get("id") or self._next_id("stu")
+            student["id"] = sid
+            self.students[sid] = student
+            self._save("students.json", self.students)
+        return student
+
+    def _get_student(self, student_id: str) -> Optional[dict]:
+        s = self.students.get(student_id)
+        return dict(s, id=student_id) if s else None
+
+    def _get_opportunity(self, opportunity_id: str) -> Optional[dict]:
+        o = self.opportunities.get(opportunity_id)
+        return dict(o, id=opportunity_id) if o else None
+
+    # ---- bookmarks -------------------------------------------------------
+    def _list_bookmarks(self, student_id: str) -> List[dict]:
+        return [b for b in self.bookmarks.values() if b.get("studentId") == student_id]
+
+    def _add_bookmark(self, student_id: str, opportunity_id: str) -> dict:
+        bid = f"{student_id}__{opportunity_id}"
+        doc = {"studentId": student_id, "opportunityId": opportunity_id,
+               "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        with self._flock:
+            self.bookmarks[bid] = doc
+            self._save("bookmarks.json", self.bookmarks)
+        return doc
+
+    def _remove_bookmark(self, student_id: str, opportunity_id: str) -> None:
+        with self._flock:
+            self.bookmarks.pop(f"{student_id}__{opportunity_id}", None)
+            self._save("bookmarks.json", self.bookmarks)
+
+    # ---- auth collections ------------------------------------------------
+    def _auth_get(self, col: str, key: str) -> Optional[dict]:
+        return self._auth.get(col, {}).get(key)
+
+    def _auth_put(self, col: str, key: str, value: dict) -> None:
+        with self._flock:
+            self._auth.setdefault(col, {})[key] = value
+            self._save("auth.json", self._auth)
+
+    def _auth_del(self, col: str, key: str) -> None:
+        with self._flock:
+            self._auth.get(col, {}).pop(key, None)
+            self._save("auth.json", self._auth)
+
+    def _auth_iter(self, col: str) -> List[tuple]:
+        return list(self._auth.get(col, {}).items())
+
+
 class FirestoreStore(BaseStore):
     """Cloud Run production store. Uses ADC -- no key file on disk."""
 
@@ -479,9 +610,9 @@ def get_store() -> BaseStore:
             resolved = "firestore"
         else:
             resolved = "memory"
-    elif backend not in ("memory", "mongo", "firestore"):
+    elif backend not in ("memory", "file", "mongo", "firestore"):
         raise RuntimeError(
-            f"DB_BACKEND={backend!r} is not valid. Use auto, memory, mongo or firestore."
+            f"DB_BACKEND={backend!r} is not valid. Use auto, memory, file, mongo or firestore."
         )
 
     if resolved == "mongo":
@@ -492,11 +623,13 @@ def get_store() -> BaseStore:
         if not config.GCP_PROJECT:
             raise RuntimeError("DB_BACKEND=firestore but GCP_PROJECT is empty.")
         _store = FirestoreStore()
+    elif resolved == "file":
+        _store = FileStore(config.DATA_DIR)
     else:
         if config.REQUIRE_DB:
             raise RuntimeError(
-                f"REQUIRE_DB=1 but resolved backend is 'memory' (DB_BACKEND={backend!r}, "
-                "MONGODB_URI and GCP_PROJECT both unset). Configure a real database."
+                f"REQUIRE_DB=1 but resolved backend is 'memory' (DB_BACKEND={backend!r}). "
+                "Configure a durable backend: file, mongo or firestore."
             )
         _store = MemoryStore()
 

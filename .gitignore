@@ -9,6 +9,16 @@ venv/
 .DS_Store
 server.log
 server.err
+tunnel.log
+tunnel.err
+public-url.txt
+
+# 55 MB cloudflared binary, downloaded on demand. Never commit it.
+tools/
+
+# Runtime data for the file backend -- user accounts and bookmarks.
+# This is live user data, not source.
+data/
 
 # Never commit GCP credentials -- Cloud Run uses ADC, no key file is needed.
 *service-account*.json

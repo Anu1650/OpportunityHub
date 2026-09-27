@@ -75,10 +75,10 @@ appear across the most open listings, so it can tell you what to learn next.
 | Layer | Choice | Why |
 |---|---|---|
 | Backend | Python 3.12 + FastAPI | Auto-generated OpenAPI docs at `/docs` |
-| Database | Firestore **or** MongoDB (pluggable) | One repository interface, three backends |
+| Database | 4 pluggable backends | One repository interface: file / memory / MongoDB / Firestore |
 | Frontend | Vanilla JS SPA + Tailwind CDN | **No build step, no bundler, no `npm install`** |
 | Auth | Email OTP + password reset | PBKDF2 hashing, server-side sessions |
-| Hosting | Docker → Google Cloud Run | Single container, single service |
+| Hosting | Cloud Run, or Cloudflare Tunnel from a laptop | Same image either way |
 
 ### Architecture
 
@@ -89,14 +89,25 @@ Browser (SPA)
 Cloud Run ── FastAPI (uvicorn, 0.0.0.0:$PORT)
                │
                └── BaseStore  ← caching layer (60s TTL)
-                      ├── MemoryStore     (local dev, zero credentials)
+                      ├── FileStore       (JSON on disk; laptop / VM)
+                      ├── MemoryStore     (tests only; loses everything)
                       ├── MongoStore      (MONGODB_URI set)
                       └── FirestoreStore  (GCP_PROJECT set, ADC)
 ```
 
 The **repository pattern** is the key design decision: the same API code runs
-locally with no cloud setup and in production against either database, with
-zero code changes — selected purely by environment variables.
+against any of four backends with zero code changes, selected by the single
+`DB_BACKEND` env var. That switch is explicit rather than inferred — an earlier
+version inferred the backend from whichever variable happened to be set, and a
+stray `MONGODB_URI` silently shadowed `GCP_PROJECT`, which is close to
+undiagnosable from a deployed URL.
+
+| `DB_BACKEND` | Persists? | Use for |
+|---|---|---|
+| `file` | Yes, to `data/*.json` | laptop, VM, tunnel demos |
+| `memory` | **No** | unit tests only |
+| `mongo` | Yes | MongoDB / Atlas |
+| `firestore` | Yes | Cloud Run (GCP_PROJECT is injected automatically) |
 
 ### Authentication
 
@@ -152,7 +163,13 @@ On Cloud Run use `gcloud run logs read -s SERVICE` to read the same lines.
 
 ## Running locally
 
-```bash
+```powershell
+.\run-local.ps1
+```
+
+Or manually:
+
+```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m uvicorn main:app --reload
@@ -161,6 +178,29 @@ py -3.12 -m venv .venv
 Open http://localhost:8080 — the landing page loads first. Create an account and
 enter the 6-digit code that arrives by email. Codes are also printed to the
 server log if you are testing without working SMTP.
+
+## Hosting from a laptop (public URL, no cloud account)
+
+```powershell
+.\fetch-cloudflared.ps1   # once: downloads tools\cloudflared.exe
+.\run-tunnel.ps1          # starts the app AND a public Cloudflare tunnel
+```
+
+This prints a public `https://<random>.trycloudflare.com` URL that works from
+anywhere. Keep the window open or the link dies.
+
+The app uses `DB_BACKEND=file`, so **accounts and bookmarks survive restarts** —
+essential when a judge refreshes the page. Writes go to `data/*.json` via a
+temp-file-then-rename, so a crash mid-write cannot corrupt the store, and a
+corrupt file is quarantined on boot rather than taking the site down.
+
+⚠️ Two limits, both of which apply to this mode only:
+
+- The URL is **random and changes on every restart**.
+- It **dies when the laptop closes**, and Cloudflare tunnels are rate-limited —
+  an abused tunnel can be shut off.
+- **Not suitable for the submission.** The brief asks for a Google Cloud Run URL.
+  Also, `data/` lives on your disk, so it cannot serve more than one machine.
 
 No cloud account or credentials needed: with no database env vars set the app
 uses the in-memory store and re-seeds on every boot. Signup works too — the OTP
@@ -284,19 +324,20 @@ Interactive docs: **`/docs`** · schema: `/openapi.json`
 │   ├── models.py         # pydantic schemas
 │   ├── recommend.py      # scoring + skill-gap engine
 │   ├── seed_data.py      # 66 listings + rolling deadlines
-│   └── store.py          # Memory / Mongo / Firestore + cache
-├── tests/
-│   └── test_eligibility.py   # parser unit tests
+│   └── store.py          # File / Memory / Mongo / Firestore + cache
+├── tests/                # 8 suites, see above
 ├── static/
 │   ├── index.html
 │   ├── app.js            # SPA: router, views, rendering
 │   ├── auth.js           # landing, signup, OTP, login, reset
 │   └── styles.css
+├── data/                 # runtime data for DB_BACKEND=file (gitignored)
 ├── requirements.txt
 ├── Dockerfile
 ├── .env.example          # copy to .env — .env itself is gitignored
+├── fetch-cloudflared.ps1 # download the tunnel binary into tools/
 ├── run-local.ps1
-├── run-tunnel.ps1
+├── run-tunnel.ps1        # app + public tunnel in one command
 └── README.md
 ```
 
@@ -305,8 +346,23 @@ Interactive docs: **`/docs`** · schema: `/openapi.json`
 ```bash
 .\.venv\Scripts\python.exe tests\test_eligibility.py   # parser unit tests
 .\.venv\Scripts\python.exe tests\test_frontend.py      # static JS/HTML checks
-.\.venv\Scripts\python.exe tests\verify_served.py      # asserts on served assets (server must be up)
+.\.venv\Scripts\python.exe tests\test_search.py        # search whitespace + typing invariants
+.\.venv\Scripts\python.exe tests\test_authz.py         # session guards
+.\.venv\Scripts\python.exe tests\verify_served.py      # asserts on served assets
+.\.venv\Scripts\python.exe tests\check_backends.py      # preflight config report
+.\.venv\Scripts\python.exe tests\test_persistence.py   # restarts the app, checks data survives
+.\.venv\Scripts\python.exe tests\test_public.py        # end-to-end over the tunnel URL
 ```
+
+`test_persistence.py` kills and restarts the server, then asserts the profile,
+bookmarks and session are still there. It is the test that would have caught
+MemoryStore wiping every user on a tunnel restart.
+
+`test_authz.py` confirms an anonymous write is refused, a bogus cookie is
+refused, and a genuine session with one character changed is refused. Note it
+uses a *fresh* cookie jar for each case — an earlier version shared one jar
+across cases, so the "unauthenticated" write was actually authenticated and the
+test wrongly reported a vulnerability.
 
 `test_frontend.py` exists because of a bug that passed every API test: a render
 function wrote to a field initialised to `null` and never assigned, so **all**
