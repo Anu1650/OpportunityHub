@@ -690,7 +690,10 @@ function showAuth() {
   $("#whoami").classList.add("hidden");
   const hash = location.hash;
   if (hash.startsWith("#/reset")) {
-    const token = new URLSearchParams(hash.split("?")[1] || "").get("token") || "";
+    // The email link is .../#/reset?token=... , so the token arrives in the
+    // fragment's query string. Also accept a bare "#/reset/<token>" form.
+    let token = new URLSearchParams(hash.split("?")[1] || "").get("token") || "";
+    if (!token) token = hash.split("/")[2] || "";
     A.mode = "reset";
     view.innerHTML = "";
     renderReset(token);

@@ -95,24 +95,79 @@ def send_otp_email(to: str, otp: str) -> Tuple[bool, str]:
         return False, f"smtp_error: {type(exc).__name__}"
 
 
+def _reset_base_url() -> str:
+    """Where the reset link should point.
+
+    PUBLIC_BASE_URL is the right answer, but a laptop tunnel is the common case
+    here and its quick-tunnel URL is random each start. Falling back to
+    public-url.txt means the link in the email actually works right now instead
+    of printing a bare token nobody can use.
+    """
+    base = (config.PUBLIC_BASE_URL or "").strip().rstrip("/")
+    if base:
+        return base
+    try:
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "public-url.txt")
+        with open(path, encoding="utf-8") as fh:
+            found = fh.read().strip()
+        if found.startswith("http"):
+            return found
+    except OSError:
+        pass
+    return ""
+
+
 def send_password_reset_email(to: str, link_token: str) -> Tuple[bool, str]:
     user = config.EMAIL_USER
     password = config.EMAIL_PASS
     if not (user and password):
         return False, "email_not_configured"
 
-    base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
-    link = f"{base}/#/reset?token={link_token}" if base else f"token: {link_token}"
+    base = _reset_base_url()
+    link = f"{base}/#/reset?token={link_token}" if base else ""
 
     msg = EmailMessage()
     msg["Subject"] = "Reset your OpportunityHub password"
     msg["From"] = config.EMAIL_FROM or f"OpportunityHub <{user}>"
     msg["To"] = to
-    msg.set_content(
-        f"Use the link below to choose a new password:\n\n    {link}\n\n"
-        f"The link expires in {config.OTP_TTL_MINUTES} minutes.\n"
-        f"If you did not request this, ignore this email -- your password is unchanged.\n"
-    )
+
+    if link:
+        msg.set_content(
+            f"Click the link below to choose a new password:\n\n    {link}\n\n"
+            f"The link expires in {config.OTP_TTL_MINUTES} minutes.\n\n"
+            f"If the button does not work, copy this address into your browser:\n"
+            f"    {link}\n\n"
+            f"If you did not request this, ignore this email -- your password is unchanged.\n"
+        )
+        msg.add_alternative(
+            f"""<html><body style="font-family:system-ui,Arial,sans-serif;background:#0f172a;
+            color:#e2e8f0;padding:24px">
+            <div style="max-width:520px;margin:auto;background:#1e293b;padding:28px;border-radius:12px">
+              <h2 style="margin:0 0 6px">Reset your password</h2>
+              <p style="color:#94a3b8;margin:0 0 20px">
+                This link expires in {config.OTP_TTL_MINUTES} minutes.</p>
+              <a href="{link}"
+                 style="background:#7c3aed;color:#fff;text-decoration:none;padding:12px 22px;
+                        border-radius:8px;font-weight:600;display:inline-block">
+                 Choose a new password</a>
+              <p style="color:#64748b;font-size:12px;margin:24px 0 0">
+                If you did not request this, ignore this email &mdash; your password is unchanged.</p>
+            </div></body></html>""",
+            subtype="html",
+        )
+    else:
+        # No known base URL. Still give the token, but say plainly that the
+        # deployment has no public address configured, rather than sending
+        # something that looks like a broken link.
+        msg.set_content(
+            "This deployment has no public address configured, so there is no\n"
+            "link to click. Take the token below to the app's reset page and\n"
+            f"paste it there:\n\n    token: {link_token}\n\n"
+            f"The token expires in {config.OTP_TTL_MINUTES} minutes.\n"
+            "If you did not request this, ignore this email -- your password is unchanged.\n\n"
+            "Tip: set PUBLIC_BASE_URL in .env so reset emails contain a real link.\n"
+        )
 
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()) as s:

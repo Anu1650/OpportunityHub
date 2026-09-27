@@ -168,14 +168,22 @@ function renderForgot() {
 
 /* ------------------------------------------------------------------ reset */
 function renderReset(token) {
+  const missing = !token;
   view.innerHTML = shell(`
     <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <h2 class="text-xl font-bold">Choose a new password</h2>
+      ${missing ? `<p class="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          No reset token in this link. Open the link from your reset email, or
+          request a new one.</p>` : ""}
       <form id="resetForm" class="mt-5 space-y-3">
         ${field("New password", "password", "password", "At least 8 characters", "required minlength=\"8\"")}
-        <button class="w-full rounded-lg bg-violet-600 py-2.5 font-semibold hover:bg-violet-500">Update password</button>
+        ${field("Confirm new password", "confirm", "password", "Type it again", "required minlength=\"8\"")}
+        <button class="w-full rounded-lg bg-violet-600 py-2.5 font-semibold hover:bg-violet-500" ${missing ? "disabled" : ""}>
+          Update password</button>
       </form>
       <p class="mt-4 text-center text-sm text-slate-400">
+        <button data-amode="forgot" class="text-violet-300 hover:underline">Request a new link</button>
+        ·
         <button data-amode="login" class="text-violet-300 hover:underline">Back to log in</button>
       </p>
     </div>`);
@@ -287,6 +295,10 @@ document.addEventListener("submit", async (e) => {
 
   if (form.id === "resetForm") {
     e.preventDefault();
+    if (fd.get("password") !== fd.get("confirm")) {
+      toast("Those passwords do not match.", "error");
+      return;
+    }
     try {
       await api("/auth/reset", {
         method: "POST",
