@@ -22,6 +22,7 @@ const state = {
   meta: { categories: Object.keys(CATS), modes: Object.keys(MODES), tags: [] },
   filters: { q: "", category: "", mode: "", skills: "", closing: "", minScore: 0, includeExpired: false, eligibleOnly: false },
   results: [],
+  searchToken: 0,
   detail: null,
   gap: [],
 };
@@ -187,12 +188,38 @@ async function renderDiscover() {
       <span class="text-xs text-slate-400">Min match:</span>
       ${[0, 40, 60, 80].map((v) => `
         <button data-score="${v}" class="border rounded-full px-2.5 py-1 text-xs ${chip(f.minScore === v)}">${v === 0 ? "Any" : v + "%+"}</button>`).join("")}
-      <span class="ml-auto text-xs text-slate-500">${state.results.length} result(s)</span>
+      <span id="result-count" class="ml-auto text-xs text-slate-500">${state.results.length} result(s)</span>
     </div>` : `<p class="mt-3 border-t border-slate-800 pt-3 text-xs text-slate-500">Load a profile to see match scores and personalised ranking.</p>`}
   </div>
 
   <div id="gap" class="mt-4"></div>
   <div id="results" class="mt-4">${skeletonGrid()}</div>`;
+
+  await refreshResults();
+}
+
+/* Update filter-chip styling in place. Rebuilding the bar would destroy the
+   search input and steal focus mid-typing. */
+function repaintChips() {
+  const on = "bg-violet-600 text-white border-violet-500";
+  const off = "bg-slate-800 text-slate-300 border-slate-700 hover:border-slate-500";
+  document.querySelectorAll("[data-cat]").forEach((b) => {
+    b.className = `chip border px-2.5 py-1 rounded-full text-xs ${
+      state.filters.category === b.dataset.cat ? on : off}`;
+  });
+  document.querySelectorAll("[data-score]").forEach((b) => {
+    b.className = `border rounded-full px-2.5 py-1 text-xs ${
+      state.filters.minScore === Number(b.dataset.score) ? on : off}`;
+  });
+}
+
+/* Re-fetch and swap ONLY the results + gap panels.
+   The filter bar (and crucially the search input) is left untouched, so typing
+   keeps focus and the caret stays where the user left it. */
+async function refreshResults() {
+  const f = state.filters;
+  const box = $("#results");
+  if (!box) return;
 
   const qs = new URLSearchParams();
   if (f.q) qs.set("q", f.q);
@@ -204,14 +231,29 @@ async function renderDiscover() {
   if (f.eligibleOnly) qs.set("eligibleOnly", "true");
   if (state.studentId) qs.set("studentId", state.studentId);
 
+  // Ignore responses that arrive out of order, so a slow early request cannot
+  // overwrite the results of a later, more specific one.
+  const token = ++state.searchToken;
+  box.innerHTML = skeletonGrid();
+
   try {
     const data = await api(`/opportunities?${qs}`);
+    if (token !== state.searchToken || !$("#results")) return;
     state.results = data.items;
+
+    const count = $("#result-count");
+    if (count) count.textContent = `${data.items.length} result${data.items.length === 1 ? "" : "s"}`;
+
     $("#results").innerHTML = data.items.length
       ? `<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">${data.items.map(oppCard).join("")}</div>`
-      : `<div class="rounded-xl border border-dashed border-slate-700 p-10 text-center text-sm text-slate-400">No opportunities match these filters.</div>`;
+      : `<div class="rounded-xl border border-dashed border-slate-700 p-10 text-center">
+           <p class="text-sm text-slate-400">No opportunities match these filters.</p>
+           ${f.q ? `<p class="mt-1 text-xs text-slate-500">Nothing matches &ldquo;${esc(f.q)}&rdquo;. Try a shorter word.</p>` : ""}
+         </div>`;
   } catch (e) {
-    $("#results").innerHTML = `<div class="rounded-xl border border-rose-500/40 p-6 text-sm text-rose-300">${esc(e.message)}</div>`;
+    if (token !== state.searchToken) return;
+    const el = $("#results");
+    if (el) el.innerHTML = `<div class="rounded-xl border border-rose-500/40 p-6 text-sm text-rose-300">${esc(e.message)}</div>`;
   }
 
   if (state.studentId) await renderGap();
@@ -551,10 +593,20 @@ document.addEventListener("click", async (e) => {
   if (save) { toggleSave(save.dataset.save); return; }
 
   const cat = t.closest("[data-cat]");
-  if (cat) { state.filters.category = cat.dataset.cat; renderDiscover(); return; }
+  if (cat) {
+    state.filters.category = cat.dataset.cat;
+    repaintChips();
+    refreshResults();
+    return;
+  }
 
   const sc = t.closest("[data-score]");
-  if (sc) { state.filters.minScore = Number(sc.dataset.score); renderDiscover(); return; }
+  if (sc) {
+    state.filters.minScore = Number(sc.dataset.score);
+    repaintChips();
+    refreshResults();
+    return;
+  }
 
   const add = t.closest("[data-add]");
   if (add) {
@@ -586,16 +638,19 @@ document.addEventListener("click", async (e) => {
 
 let debounce;
 document.addEventListener("input", (e) => {
-  if (e.target.id === "q") {
-    clearTimeout(debounce);
-    debounce = setTimeout(() => { state.filters.q = e.target.value; renderDiscover(); }, 280);
-  }
+  if (e.target.id !== "q") return;
+  // Only the results panel is re-rendered, so the input keeps focus and the
+  // caret stays put. Rebuilding the whole view here destroyed the input
+  // mid-sentence, and the rest of the query was typed into nothing.
+  state.filters.q = e.target.value;
+  clearTimeout(debounce);
+  debounce = setTimeout(refreshResults, 280);
 });
 document.addEventListener("change", (e) => {
-  if (e.target.id === "f-mode")     { state.filters.mode = e.target.value; renderDiscover(); }
-  if (e.target.id === "f-closing")  { state.filters.closing = e.target.value; renderDiscover(); }
-  if (e.target.id === "f-expired")  { state.filters.includeExpired = e.target.checked; renderDiscover(); }
-  if (e.target.id === "f-eligible") { state.filters.eligibleOnly = e.target.checked; renderDiscover(); }
+  if (e.target.id === "f-mode")     { state.filters.mode = e.target.value; refreshResults(); }
+  if (e.target.id === "f-closing")  { state.filters.closing = e.target.value; refreshResults(); }
+  if (e.target.id === "f-expired")  { state.filters.includeExpired = e.target.checked; refreshResults(); }
+  if (e.target.id === "f-eligible") { state.filters.eligibleOnly = e.target.checked; refreshResults(); }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.id?.startsWith("in-")) {

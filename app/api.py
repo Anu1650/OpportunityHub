@@ -44,9 +44,16 @@ def _days_left(deadline: Optional[str]) -> Optional[int]:
 
 def _matches(o: dict, q: str, skills: str, category: str, mode: str, closing: str) -> bool:
     if q:
-        blob = f"{o.get('title', '')} {o.get('org', '')} {o.get('description', '')}".lower()
-        if q.lower() not in blob:
-            return False
+        # Collapse whitespace and pad both sides so " machine " and "machine"
+        # behave the same, and a trailing space mid-sentence does not
+        # temporarily match nothing.
+        needle = " ".join(str(q).split())
+        if needle:
+            hay = " ".join(
+                f"{o.get('title', '')} {o.get('org', '')} {o.get('description', '')}".split()
+            ).lower()
+            if needle.lower() not in hay:
+                return False
     if category and o.get("category") != category:
         return False
     if mode and o.get("mode") != mode:
