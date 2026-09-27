@@ -7,7 +7,7 @@ const A = {
   mode: "landing",      // landing | login | signup | otp | forgot | reset
   email: "",
   name: "",
-  devCode: null,
+  emailSent: null,      // whether the last OTP actually went out
   busy: false,
 };
 
@@ -125,15 +125,19 @@ function renderSignup() {
 
 /* -------------------------------------------------------------------- OTP */
 function renderOtp() {
+  // The code is never rendered here. If delivery failed, say so plainly rather
+  // than leaking the OTP into the page, devtools or a screen share.
+  const failed = A.emailSent === false;
   view.innerHTML = shell(`
     <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <h2 class="text-xl font-bold">Verify your email</h2>
       <p class="mt-1 text-sm text-slate-400">
-        Enter the 6-digit code sent to <b class="text-slate-200">${esc(A.email)}</b>.
+        We sent a 6-digit code to <b class="text-slate-200">${esc(A.email)}</b>.
+        It expires in 10 minutes.
       </p>
-      ${A.devCode ? alertBox(
-        `📧 Email is not configured on this deployment, so your code is: <b class="text-lg tracking-widest">${esc(A.devCode)}</b>`,
-        "ok") : ""}
+      ${failed ? alertBox(
+        "⚠ We could not send the email. Check the server logs for the code, and verify the SMTP settings in .env."
+      ) : ""}
       <form id="otpForm" class="mt-5 space-y-3">
         <input name="code" inputmode="numeric" maxlength="6" required autofocus
           placeholder="000000"
@@ -207,8 +211,8 @@ document.addEventListener("click", async (e) => {
         method: "POST",
         body: JSON.stringify({ email: A.email }),
       });
-      A.devCode = r.devCode;
-      toast(r.emailSent ? "New code sent to your email." : `New code: ${r.devCode}`);
+      A.emailSent = r.emailSent;
+      toast(r.emailSent ? "A new code is on its way." : "Could not send the email. Check the server logs.", r.emailSent ? "ok" : "error");
     } catch (err) { toast(err.message); }
     return;
   }
@@ -240,7 +244,7 @@ document.addEventListener("submit", async (e) => {
       });
       A.email = r.email;
       A.name = fd.get("name");
-      A.devCode = r.devCode;
+      A.emailSent = r.emailSent;
       setMode("otp");
     } catch (err) { toast(err.message); }
   }
@@ -261,12 +265,11 @@ document.addEventListener("submit", async (e) => {
     const email = fd.get("email");
     try {
       const r = await api("/auth/forgot", { method: "POST", body: JSON.stringify({ email }) });
-      if (r.devToken) {
-        renderReset(r.devToken);
-        toast("Email is not configured here — reset token generated for you.");
-      } else {
+      if (r.emailSent) {
         toast("If that email is registered, a reset link is on its way.", "ok");
         setMode("login");
+      } else {
+        toast("Could not send the reset email. Check the server logs.", "error");
       }
     } catch (err) { toast(err.message); }
   }

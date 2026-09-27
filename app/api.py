@@ -1,6 +1,7 @@
 """HTTP API. Thin controllers -- all logic lives in store.py / recommend.py."""
 
 import hmac
+import logging
 import time
 from datetime import date, datetime
 from typing import List, Optional
@@ -22,6 +23,7 @@ from .recommend import score_opportunity, skill_gap
 from .store import get_store
 
 router = APIRouter(prefix="/api")
+log = logging.getLogger("fitfest.auth")
 
 SESSION_COOKIE = "oh_session"
 
@@ -142,8 +144,15 @@ def _start_session(store, record: dict, response: Response) -> None:
 def _issue_otp(store, email: str) -> dict:
     code = auth.generate_otp()
     store.otp_put(email, {"code": code, "createdAt": time.time(), "attempts": 0})
-    sent, _ = auth.send_otp_email(email, code)
-    return {"code": code, "sent": sent}
+    sent, detail = auth.send_otp_email(email, code)
+    # Logged server-side only. The code is never returned to the client, so it
+    # cannot be read off the page, out of devtools, or from an intercepted
+    # response. This is the capture point for local testing.
+    log.info(
+        "OTP for %s: %s  (email %s: %s)",
+        email, code, "sent" if sent else "FAILED", detail,
+    )
+    return {"code": code, "sent": sent, "detail": detail}
 
 
 @router.post("/auth/signup")
@@ -164,13 +173,12 @@ def signup(payload: SignupIn, response: Response):
         "verified": False,
         "studentId": None,
     })
+    if not otp["sent"]:
+        log.warning("signup OTP could not be emailed to %s (%s)", email, otp["detail"])
     return {
         "email": email,
         "otpRequired": True,
         "emailSent": otp["sent"],
-        # Shown in the UI only when SMTP is unconfigured, so the signup flow
-        # still completes on a machine with no mail credentials.
-        "devCode": None if otp["sent"] else otp["code"],
     }
 
 
@@ -218,7 +226,7 @@ def resend_otp(payload: ForgotIn):
     if not store.auth_user_get(email):
         raise HTTPException(404, "No account found for that email")
     otp = _issue_otp(store, email)
-    return {"emailSent": otp["sent"], "devCode": None if otp["sent"] else otp["code"]}
+    return {"emailSent": otp["sent"]}
 
 
 @router.post("/auth/login")
@@ -266,12 +274,15 @@ def forgot(payload: ForgotIn):
     record = store.auth_user_get(email)
     if not record:
         # Deliberately identical response, for the same anti-enumeration reason.
-        return {"ok": True, "devToken": None}
+        return {"ok": True, "emailSent": True}
 
     token = auth.new_session_token()
     store.reset_put(email, {"token": token, "createdAt": time.time()})
-    sent, _ = auth.send_password_reset_email(email, token)
-    return {"ok": True, "devToken": None if sent else token}
+    sent, detail = auth.send_password_reset_email(email, token)
+    # Token goes to the console, never to the client.
+    log.info("password-reset token for %s: %s  (email %s: %s)", email, token,
+             "sent" if sent else "FAILED", detail)
+    return {"ok": True, "emailSent": sent}
 
 
 @router.post("/auth/reset")

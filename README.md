@@ -111,15 +111,27 @@ to install or get wrong.
   revoked instantly.
 - **OTP**: 6 digits from `SystemRandom`, 10-minute expiry, locked out after 5
   wrong attempts. Codes are cleared on success.
+- **The OTP is never sent to the client.** It goes to the mailbox and to the
+  server log only — an OTP in an API response is readable from devtools or a
+  screen share, which would defeat the point of email verification. There is a
+  test asserting no `devCode`/`devToken` field can reappear.
 - **Password reset**: single-use, expiring token. Resetting revokes every
   active session for that account, since old tokens were issued against the
   previous password.
 - **Anti-enumeration**: `/auth/login` and `/auth/forgot` return identical
   responses whether or not an email is registered, so neither endpoint can be
   used to discover which addresses have accounts.
-- If `EMAIL_USER`/`EMAIL_PASS` are unset, the OTP is returned in the response
-  as `devCode` and shown in the UI, so the signup flow still completes on a
-  machine with no mail credentials.
+
+### Capturing a code while testing
+
+Every code is printed to the server log, so you can complete the flow even
+while mail delivery is slow or blocked:
+
+```
+INFO fitfest.auth: OTP for you@college.edu: 612840  (email sent: sent)
+```
+
+On Cloud Run use `gcloud run logs read -s SERVICE` to read the same lines.
 
 ### Three backend notes worth knowing
 
@@ -147,7 +159,8 @@ py -3.12 -m venv .venv
 ```
 
 Open http://localhost:8080 — the landing page loads first. Create an account and
-enter the OTP shown on screen (it is emailed only once SMTP is configured).
+enter the 6-digit code that arrives by email. Codes are also printed to the
+server log if you are testing without working SMTP.
 
 No cloud account or credentials needed: with no database env vars set the app
 uses the in-memory store and re-seeds on every boot. Signup works too — the OTP
@@ -326,22 +339,20 @@ Honest about what an MVP does not do:
 - Password reset iterates the reset collection to match tokens, which is fine
   at hackathon scale but would want a real index in production.
 
-### ⚠️ Risk introduced by removing guest access
+### ⚠️ Risk: email delivery is now a hard dependency
 
-Because there is no guest mode, **a visitor can only get in if they can read the
-email the OTP was sent to.** Two failure cases to test before you submit:
+There is **no guest mode and no on-screen code**, so **SMTP must work or nobody
+can sign in.** Before submitting, test the real flow end to end with an address
+you control:
 
-1. **SMTP not configured** — the code appears in the UI instead. Verified working.
-2. **SMTP configured but sending fails** (rate limit, wrong app password,
-   account flagged) — the code still appears in the UI, because `send_otp_email`
-   returns a status instead of raising. Verified working.
-3. **SMTP working, but the visitor types an address they cannot read** (or the
-   mail is filtered) — they are stuck. Nothing in the app can recover from this
-   except "Resend code". Test the real flow end-to-end with a genuine address
-   before demoing.
+1. Send yourself a signup and confirm the mail arrives (check spam).
+2. Confirm `emailSent: true` in the `POST /api/auth/signup` response.
+3. Run `gcloud run logs read -s opportunityhub` — every code is logged there, so
+   you can see whether delivery was attempted and what it returned.
 
-The cheapest insurance: keep `EMAIL_USER` blank on the deployed instance, so
-verification always falls back to the on-screen code.
+If `emailSent` is `false`, the UI shows a clear warning. The usual causes are a
+missing App Password, 2-Step Verification not enabled, or Gmail rate-limiting
+logins from a new IP.
 
 ## Social
 

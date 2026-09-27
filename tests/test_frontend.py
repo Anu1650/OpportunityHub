@@ -96,5 +96,15 @@ if __name__ == "__main__":
                         "/demo-profile" not in open(os.path.join(ROOT, "app", "api.py"),
                                                     encoding="utf-8").read())
 
+    print("\nOTP never reaches the client")
+    api_py = open(os.path.join(ROOT, "app", "api.py"), encoding="utf-8").read()
+    # An OTP in an API response is readable from devtools or a shared screen,
+    # which defeats the point of email verification.
+    failed += not check("no devCode in any response", "devCode" not in api_py)
+    failed += not check("no devToken in any response", "devToken" not in api_py)
+    failed += not check("no devCode/devToken in the frontend",
+                        "devCode" not in all_js and "devToken" not in all_js)
+    failed += not check("OTP is captured server-side", "OTP for %s: %s" in api_py)
+
     print(f"\n{'ALL PASS' if not failed else f'{failed} FAILURES'}")
     sys.exit(1 if failed else 0)
