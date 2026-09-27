@@ -7,6 +7,7 @@ carried the way a browser would.
 Run: .\.venv\Scripts\python.exe tests\test_public.py
 """
 
+import http.client
 import http.cookiejar
 import json
 import os
@@ -55,6 +56,15 @@ if __name__ == "__main__":
     print(f"testing {BASE}\n")
 
     print("public reachability")
+    # A shared link often arrives with /index.html appended, and clean paths
+    # like /login are typed by hand. Both used to 404 and looked like a dead
+    # site rather than a routing detail.
+    for path in ("/", "/index.html", "/login", "/dashboard", "/saved", "/profile"):
+        with urllib.request.urlopen(BASE + path, timeout=45) as r:
+            body = r.read().decode("utf-8", "ignore")
+        check(f"{path} serves the app", r.status == 200 and "OpportunityHub" in body)
+    with urllib.request.urlopen(BASE + "/favicon.ico", timeout=45) as r:
+        check("/favicon.ico handled", r.status in (200, 204), str(r.status))
     h = req("/healthz")
     check("healthz ok", h["status"] == "ok", json.dumps(h))
     meta = req("/api/meta")
@@ -67,6 +77,30 @@ if __name__ == "__main__":
     check("landing page served", "OpportunityHub" in index, f"{len(index)} bytes")
     with urllib.request.urlopen(BASE + "/docs", timeout=45) as r:
         check("/docs served", r.status == 200)
+
+    print("\nunknown API paths stay JSON, and .env is not reachable")
+    for path in ("/api/nope", "/api/opportunities/doesnotexist"):
+        try:
+            urllib.request.urlopen(BASE + path, timeout=45)
+            check(f"{path} returns 404", False, "it was ALLOWED")
+        except urllib.error.HTTPError as e:
+            payload = e.read().decode("utf-8", "ignore")
+            check(f"{path} returns 404 JSON", e.code == 404 and "detail" in payload)
+
+    # Raw socket so the client cannot normalise the path before it is sent.
+    for path in ("/../.env", "/..%2f.env", "/.%2e/.env", "/index.html/../../.env"):
+        try:
+            conn = http.client.HTTPConnection(
+                BASE.split("//")[1].split("/")[0], timeout=45)
+            conn.request("GET", path)
+            resp = conn.getresponse()
+            body = resp.read()
+            check(f"{path} does not leak .env",
+                  b"SECRET_KEY" not in body and b"EMAIL_PASS" not in body,
+                  f"{resp.status}, {len(body)} bytes")
+            conn.close()
+        except Exception as exc:
+            check(f"{path} does not leak .env", True, f"blocked: {type(exc).__name__}")
 
     print("\nsearch over the public link")
     check("'open source' finds results",

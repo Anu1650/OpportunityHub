@@ -7,7 +7,7 @@ there is no CORS configuration anywhere in this project.
 import logging
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -65,4 +65,34 @@ if os.path.isdir(STATIC_DIR):
 
     @app.get("/", include_in_schema=False)
     def index():
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+    @app.get("/index.html", include_in_schema=False)
+    def index_html():
+        # People share ".../index.html" URLs, and a 404 there looks like a dead
+        # link rather than a routing detail. Serve the same file.
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        # The inline SVG favicon in index.html is enough; without this route the
+        # browser still requests /favicon.ico and gets a 404 in the console.
+        return Response(status_code=204)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_fallback(full_path: str):
+        """Serve the SPA for unknown, non-API paths.
+
+        Without this, /login or /dashboard return 404, so a hand-typed or
+        shared clean URL looks like a broken site. Unknown /api/* paths are
+        deliberately left to FastAPI so real API 404s stay JSON.
+        """
+        if full_path.startswith(("api/", "static/", "docs", "openapi.json")):
+            raise HTTPException(404, "Not Found")
+        candidate = os.path.normpath(os.path.join(STATIC_DIR, full_path))
+        # Never let a crafted path escape the static directory.
+        if os.path.isfile(candidate) and os.path.abspath(candidate).startswith(
+            os.path.abspath(STATIC_DIR)
+        ):
+            return FileResponse(candidate)
         return FileResponse(os.path.join(STATIC_DIR, "index.html"))
