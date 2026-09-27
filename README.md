@@ -40,8 +40,9 @@ opportunities.
 | ⭐ **Skill-gap analysis** | Proportional bars: "C++ ████████░░ — unlocks 11 open opportunities" |
 | ⭐ **Eligibility matching** | Year-of-study check per listing, with an **Eligible only** filter |
 
-Extras beyond the brief: **demo mode** (one-click sample profile), **match
-explanations**, **deadline countdowns**, and a browsable **OpenAPI docs** at `/docs`.
+Extras beyond the brief: **a public landing page**, **email-OTP accounts with
+password reset**, **match explanations**, **deadline countdowns**, and a
+browsable **OpenAPI docs** at `/docs`.
 
 ## How the matching works
 
@@ -145,7 +146,8 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn main:app --reload
 ```
 
-Open http://localhost:8080 — sign up, or click **Explore with a demo profile**.
+Open http://localhost:8080 — the landing page loads first. Create an account and
+enter the OTP shown on screen (it is emailed only once SMTP is configured).
 
 No cloud account or credentials needed: with no database env vars set the app
 uses the in-memory store and re-seeds on every boot. Signup works too — the OTP
@@ -299,6 +301,10 @@ minimum is 2), `"Final-year"`, and `"Postgraduate students only"`.
 
 Honest about what an MVP does not do:
 
+- **There is no demo or guest mode.** The app is fully auth-gated, so every
+  visitor must sign up and verify an OTP to see anything. That makes the first
+  impression look like a real product, but it also means a broken SMTP config
+  locks everyone out — see the risk note below.
 - **Listings are seeded, not admin-managed.** 66 real programmes with genuine
   apply links ship as seed data. There is no admin panel to post new listings.
 - **The session cookie is not marked `secure`.** It should be once served over
@@ -310,6 +316,23 @@ Honest about what an MVP does not do:
 - Recommendations are rule-based, not learned from behaviour.
 - Password reset iterates the reset collection to match tokens, which is fine
   at hackathon scale but would want a real index in production.
+
+### ⚠️ Risk introduced by removing guest access
+
+Because there is no guest mode, **a visitor can only get in if they can read the
+email the OTP was sent to.** Two failure cases to test before you submit:
+
+1. **SMTP not configured** — the code appears in the UI instead. Verified working.
+2. **SMTP configured but sending fails** (rate limit, wrong app password,
+   account flagged) — the code still appears in the UI, because `send_otp_email`
+   returns a status instead of raising. Verified working.
+3. **SMTP working, but the visitor types an address they cannot read** (or the
+   mail is filtered) — they are stuck. Nothing in the app can recover from this
+   except "Resend code". Test the real flow end-to-end with a genuine address
+   before demoing.
+
+The cheapest insurance: keep `EMAIL_USER` blank on the deployed instance, so
+verification always falls back to the on-screen code.
 
 ## Social
 

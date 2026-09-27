@@ -361,20 +361,6 @@ SEED_OPPORTUNITIES = [
          deadline="2025-10-12", applyUrl="https://www.vvm.org/"),
 ]
 
-# One-click sample profile for demo mode. Chosen to show off every scoring
-# path: strong skill overlap, interest overlap, and a deliberate skill gap.
-DEMO_STUDENT = {
-    "name": "Aarav Sharma",
-    "email": "aarav.sharma@fit.edu.in",
-    "university": "Flora Institute of Technology, Pune",
-    "year": "3rd Year",
-    "degree": "B.Tech Computer Engineering",
-    "skills": ["Python", "JavaScript", "React", "SQL", "Git"],
-    "interests": ["machine learning", "open source", "startups", "web development"],
-    "categories": ["internship", "hackathon", "course", "scholarship"],
-}
-
-
 def build_seed() -> list:
     """Fixed listings + rolling deadlines, resolved against today's date."""
     rows = [dict(r) for r in SEED_OPPORTUNITIES]

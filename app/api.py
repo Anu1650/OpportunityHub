@@ -19,7 +19,6 @@ from .models import (
     VerifyOtpIn,
 )
 from .recommend import score_opportunity, skill_gap
-from .seed_data import DEMO_STUDENT
 from .store import get_store
 
 router = APIRouter(prefix="/api")
@@ -331,12 +330,6 @@ def get_student(student_id: str):
     if not student:
         raise HTTPException(404, "Student not found")
     return student
-
-
-@router.post("/demo-profile")
-def demo_profile():
-    """One-click sample profile so a judge never lands on an empty state."""
-    return get_store().save_student(dict(DEMO_STUDENT))
 
 
 # --------------------------------------------------------------------------

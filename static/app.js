@@ -127,15 +127,15 @@ const skeletonGrid = () =>
 function noProfile() {
   return `
   <div class="rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-10 text-center">
-    <div class="text-4xl">👋</div>
-    <h2 class="mt-3 text-lg font-semibold">Start with your profile</h2>
+    <div class="text-4xl">🔐</div>
+    <h2 class="mt-3 text-lg font-semibold">You're signed out</h2>
     <p class="mx-auto mt-1 max-w-md text-sm text-slate-400">
-      Tell us your education, skills and interests and we'll rank every open opportunity for you
-      — and show you exactly why each one matched.
+      Log in to see your matches, saved opportunities and dashboard. New here?
+      Create an account — it takes about 30 seconds.
     </p>
     <div class="mt-5 flex flex-wrap justify-center gap-2">
-      <button id="btn-demo-2" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold hover:bg-violet-500">Load demo profile</button>
-      <a href="#/profile" class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold hover:border-violet-500">Create my profile</a>
+      <button data-amode="signup" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold hover:bg-violet-500">Create account</button>
+      <button data-amode="login" class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold hover:border-violet-500">Log in</button>
     </div>
   </div>`;
 }
@@ -546,18 +546,6 @@ document.addEventListener("click", async (e) => {
   const save = t.closest("[data-save]");
   if (save) { toggleSave(save.dataset.save); return; }
 
-  if (t.closest("#btn-demo") || t.closest("#btn-demo-2")) {
-    const b = t.closest("button");
-    if (b) { b.disabled = true; b.textContent = "Loading…"; }
-    try {
-      const s = await api("/demo-profile", { method: "POST" });
-      setStudent(s.id, s);
-      showApp();
-      toast("Exploring as Aarav Sharma — demo profile", "ok");
-    } catch (err) { toast("Demo failed: " + err.message); }
-    return;
-  }
-
   const cat = t.closest("[data-cat]");
   if (cat) { state.filters.category = cat.dataset.cat; renderDiscover(); return; }
 
@@ -684,24 +672,18 @@ document.addEventListener("click", async (e) => {
     // A reset link works even with no session.
     if (location.hash.startsWith("#/reset")) { showAuth(); return; }
 
+    // The session cookie is the only source of truth. A stale studentId in
+    // localStorage must not grant access, so it is discarded on sign-out.
     const me = await api("/auth/me");
     if (me.authenticated && me.studentId) {
       state.authed = true;
       const s = await api(`/students/${me.studentId}`);
       setStudent(s.id, s);
       showApp();
-    } else if (state.studentId) {
-      // Returning demo/anonymous visitor with a cached profile id.
-      try {
-        state.profile = await api(`/students/${state.studentId}`);
-        setStudent(state.studentId, state.profile);
-        showApp();
-      } catch (_) {
-        state.studentId = null;
-        localStorage.removeItem("oh_student");
-        showAuth();
-      }
     } else {
+      state.studentId = null;
+      state.profile = null;
+      localStorage.removeItem("oh_student");
       showAuth();
     }
   } catch (e) {

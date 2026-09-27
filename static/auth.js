@@ -59,12 +59,9 @@ function renderLanding() {
         </button>
       </div>
 
-      <div class="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
-        <p class="text-sm text-amber-200">⏱ Pressing the clock, or just exploring?</p>
-        <button data-demo class="mt-2 rounded-lg border border-amber-500/50 px-4 py-1.5 text-sm font-semibold text-amber-200 hover:bg-amber-500/10">
-          Explore with a demo profile — no signup needed
-        </button>
-      </div>
+      <p class="mt-6 text-xs text-slate-500">
+        Free forever · No card required · 66 verified listings
+      </p>
     </div>
 
     <div class="grid gap-4 border-t border-slate-800 px-6 py-8 sm:grid-cols-2 lg:grid-cols-4 sm:px-12">
@@ -148,7 +145,6 @@ function renderOtp() {
       </div>
     </div>`, { back: true });
 }
-
 /* ----------------------------------------------------------------- forgot */
 function renderForgot() {
   A.view.innerHTML = shell(`
@@ -214,14 +210,6 @@ document.addEventListener("click", async (e) => {
       toast(r.emailSent ? "New code sent to your email." : `New code: ${r.devCode}`);
     } catch (err) { toast(err.message); }
     return;
-  }
-
-  // Demo profile: skip auth entirely so a judge can see the product instantly.
-  if (t.closest("[data-demo]")) {
-    const s = await api("/demo-profile", { method: "POST" });
-    setStudent(s.id, s);
-    showApp();
-    toast("Exploring as Aarav Sharma — demo profile");
   }
 });
 
