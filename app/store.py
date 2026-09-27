@@ -22,6 +22,13 @@ def _norm(value) -> str:
     return str(value or "").strip().lower()
 
 
+def _next_object_id() -> str:
+    """Readable, collision-resistant id without needing bson at import time."""
+    import uuid
+
+    return uuid.uuid4().hex[:12]
+
+
 def _norm_list(values) -> List[str]:
     """Dedupe + strip, preserving the author's capitalisation.
 
@@ -38,7 +45,7 @@ def _norm_list(values) -> List[str]:
 
 
 class BaseStore:
-    """Caching wrapper. Subclasses implement the five _raw_* methods."""
+    """Caching wrapper. Subclasses implement the _raw_* and _auth_* methods."""
 
     def __init__(self) -> None:
         self._cache: Optional[List[dict]] = None
@@ -92,6 +99,74 @@ class BaseStore:
 
     def _count_opportunities(self) -> int:
         raise NotImplementedError
+
+    # ---- key/value auth collections -------------------------------------
+    # Implemented once per backend so all auth logic lives in this class
+    # rather than being triplicated across Memory / Mongo / Firestore.
+    def _auth_get(self, col: str, key: str) -> Optional[dict]:
+        raise NotImplementedError
+
+    def _auth_put(self, col: str, key: str, value: dict) -> None:
+        raise NotImplementedError
+
+    def _auth_del(self, col: str, key: str) -> None:
+        raise NotImplementedError
+
+    def _auth_iter(self, col: str) -> List[tuple]:
+        """All (key, value) pairs in an auth collection. Needed to resolve a
+        reset token to its email, and to revoke a user's sessions."""
+        raise NotImplementedError
+
+    # ---- auth API --------------------------------------------------------
+    def auth_user_get(self, email: str) -> Optional[dict]:
+        return self._auth_get("users", _norm(email))
+
+    def auth_user_put(self, email: str, record: dict) -> None:
+        self._auth_put("users", _norm(email), record)
+
+    def otp_get(self, email: str) -> Optional[dict]:
+        return self._auth_get("otps", _norm(email))
+
+    def otp_put(self, email: str, record: dict) -> None:
+        self._auth_put("otps", _norm(email), record)
+
+    def otp_clear(self, email: str) -> None:
+        self._auth_del("otps", _norm(email))
+
+    def session_get(self, token: str) -> Optional[dict]:
+        return self._auth_get("sessions", token)
+
+    def session_put(self, token: str, record: dict) -> None:
+        self._auth_put("sessions", token, record)
+
+    def session_delete(self, token: str) -> None:
+        self._auth_del("sessions", token)
+
+    def reset_get(self, email: str) -> Optional[dict]:
+        return self._auth_get("resets", _norm(email))
+
+    def reset_put(self, email: str, record: dict) -> None:
+        self._auth_put("resets", _norm(email), record)
+
+    def reset_clear(self, email: str) -> None:
+        self._auth_del("resets", _norm(email))
+
+    def reset_email_for_token(self, token: str) -> Optional[str]:
+        """Resolve a reset token back to the account it belongs to."""
+        for key, record in self._auth_iter("resets"):
+            if record and record.get("token") == token:
+                return key
+        return None
+
+    def sessions_delete_for_email(self, email: str) -> int:
+        """Revoke every session for an account. Called after a password reset
+        so tokens issued against the old password stop working."""
+        revoked = 0
+        for key, record in self._auth_iter("sessions"):
+            if (record or {}).get("email") == email:
+                self._auth_del("sessions", key)
+                revoked += 1
+        return revoked
 
     # ---- shared public API ----------------------------------------------
     def count_opportunities(self) -> int:
@@ -153,7 +228,20 @@ class MemoryStore(BaseStore):
         self.students: Dict[str, dict] = {}
         self.opportunities: Dict[str, dict] = {}
         self.bookmarks: Dict[str, dict] = {}
+        self._auth: Dict[str, Dict[str, dict]] = {}
         self._seq = 0
+
+    def _auth_get(self, col: str, key: str) -> Optional[dict]:
+        return self._auth.get(col, {}).get(key)
+
+    def _auth_put(self, col: str, key: str, value: dict) -> None:
+        self._auth.setdefault(col, {})[key] = value
+
+    def _auth_del(self, col: str, key: str) -> None:
+        self._auth.get(col, {}).pop(key, None)
+
+    def _auth_iter(self, col: str) -> List[tuple]:
+        return list(self._auth.get(col, {}).items())
 
     def _next_id(self, prefix: str) -> str:
         self._seq += 1
@@ -263,16 +351,126 @@ class FirestoreStore(BaseStore):
     def _remove_bookmark(self, student_id: str, opportunity_id: str) -> None:
         self.bookmarks.document(f"{student_id}__{opportunity_id}").delete()
 
+    def _auth_get(self, col: str, key: str) -> Optional[dict]:
+        snap = self._db.collection(col).document(key).get()
+        return snap.to_dict() if snap.exists else None
+
+    def _auth_put(self, col: str, key: str, value: dict) -> None:
+        self._db.collection(col).document(key).set(value)
+
+    def _auth_del(self, col: str, key: str) -> None:
+        self._db.collection(col).document(key).delete()
+
+    def _auth_iter(self, col: str) -> List[tuple]:
+        return [(d.id, d.to_dict()) for d in self._db.collection(col).stream()]
+
+
+class MongoStore(BaseStore):
+    """MongoDB / Atlas backend.
+
+    Selected when MONGODB_URI is set. Note the free-tier caveat: an Atlas M0
+    cluster pauses after inactivity, so the first request after a quiet period
+    can take a minute or two to wake.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        from pymongo import MongoClient
+
+        # Server-selection timeouts kept short so a paused cluster surfaces as
+        # an error fast rather than hanging the request indefinitely.
+        self._client = MongoClient(
+            config.MONGODB_URI, serverSelectionTimeoutMS=8000, connectTimeoutMS=8000
+        )
+        self._db = self._client[config.MONGODB_DB]
+        self.students = self._db["students"]
+        self.opportunities = self._db["opportunities"]
+        self.bookmarks = self._db["bookmarks"]
+
+        self.students.create_index("email", unique=True)
+        self.bookmarks.create_index([("studentId", 1), ("opportunityId", 1)], unique=True)
+
+    def seed(self, rows: List[dict]) -> int:
+        if self.count_opportunities() > 0:
+            return 0
+        for row in rows:
+            row = dict(row)
+            if "id" not in row:
+                row["id"] = _next_object_id()
+            self.opportunities.insert_one(row)
+        self.invalidate_cache()
+        return len(rows)
+
+    def _list_opportunities(self) -> List[dict]:
+        return [{k: v for k, v in d.items() if k != "_id"} for d in self.opportunities.find({})]
+
+    def _list_students(self) -> List[dict]:
+        return [{k: v for k, v in d.items() if k != "_id"} for d in self.students.find({})]
+
+    def _put_student(self, student: dict) -> dict:
+        sid = student["id"]
+        self.students.update_one({"id": sid}, {"$set": student}, upsert=True)
+        return student
+
+    def _get_student(self, student_id: str) -> Optional[dict]:
+        d = self.students.find_one({"id": student_id}, {"_id": 0})
+        return d
+
+    def _get_opportunity(self, opportunity_id: str) -> Optional[dict]:
+        return self.opportunities.find_one({"id": opportunity_id}, {"_id": 0})
+
+    def _list_bookmarks(self, student_id: str) -> List[dict]:
+        return list(self.bookmarks.find({"studentId": student_id}, {"_id": 0}))
+
+    def _add_bookmark(self, student_id: str, opportunity_id: str) -> dict:
+        doc = {
+            "studentId": student_id,
+            "opportunityId": opportunity_id,
+            "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        self.bookmarks.update_one(
+            {"studentId": student_id, "opportunityId": opportunity_id},
+            {"$set": doc},
+            upsert=True,
+        )
+        return doc
+
+    def _remove_bookmark(self, student_id: str, opportunity_id: str) -> None:
+        self.bookmarks.delete_one({"studentId": student_id, "opportunityId": opportunity_id})
+
+    def _auth_get(self, col: str, key: str) -> Optional[dict]:
+        return self._db[col].find_one({"_id": key})
+
+    def _auth_put(self, col: str, key: str, value: dict) -> None:
+        self._db[col].update_one({"_id": key}, {"$set": value}, upsert=True)
+
+    def _auth_del(self, col: str, key: str) -> None:
+        self._db[col].delete_one({"_id": key})
+
+    def _auth_iter(self, col: str) -> List[tuple]:
+        return [(d["_id"], d) for d in self._db[col].find({})]
+
 
 _store: Optional[BaseStore] = None
 
 
 def get_store() -> BaseStore:
-    """Firestore when GCP_PROJECT is set, otherwise in-memory."""
+    """Pick a backend from the environment.
+
+    MONGODB_URI wins if set, then GCP_PROJECT, otherwise in-memory. With
+    REQUIRE_DB=1 a missing configuration raises instead of silently falling
+    back to memory, which would look like data loss in production.
+    """
     global _store
     if _store is None:
-        if config.GCP_PROJECT:
+        if config.MONGODB_URI:
+            _store = MongoStore()
+        elif config.GCP_PROJECT:
             _store = FirestoreStore()
+        elif config.REQUIRE_DB:
+            raise RuntimeError(
+                "REQUIRE_DB is set but neither MONGODB_URI nor GCP_PROJECT is configured."
+            )
         else:
             _store = MemoryStore()
     return _store

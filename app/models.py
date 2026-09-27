@@ -62,3 +62,37 @@ class Opportunity(OpportunityIn):
 class BookmarkIn(BaseModel):
     studentId: str
     opportunityId: str
+
+
+class SignupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    email: str = Field(min_length=3, max_length=120)
+    password: str = Field(min_length=8, max_length=200)
+
+
+class LoginIn(BaseModel):
+    email: str = Field(min_length=3, max_length=120)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class VerifyOtpIn(BaseModel):
+    email: str
+    code: str = Field(min_length=4, max_length=10)
+
+
+class ForgotIn(BaseModel):
+    email: str
+
+
+class ResetIn(BaseModel):
+    token: str
+    password: str = Field(min_length=8, max_length=200)
+
+
+class ProfileUpdateIn(BaseModel):
+    university: str = ""
+    year: str = ""
+    degree: str = ""
+    skills: List[str] = []
+    interests: List[str] = []
+    categories: List[str] = []

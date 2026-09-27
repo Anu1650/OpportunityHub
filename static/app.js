@@ -18,6 +18,7 @@ const MODES = { remote: "🌐 Remote", onsite: "📍 On-site", hybrid: "🔀 Hyb
 const state = {
   studentId: localStorage.getItem("oh_student") || null,
   profile: null,
+  authed: false,
   meta: { categories: Object.keys(CATS), modes: Object.keys(MODES), tags: [] },
   filters: { q: "", category: "", mode: "", skills: "", closing: "", minScore: 0, includeExpired: false, eligibleOnly: false },
   results: [],
@@ -418,15 +419,24 @@ async function saveProfile(e) {
   body.skills = draft.skills;
   body.interests = draft.interests;
   body.categories = draft.categories;
-  const btn = e.target.querySelector("button[type=submit], button:not([type])");
+
+  const btn = e.target.querySelector("button:not([data-add]):not([data-rm]):not([data-togcat])");
   if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+
   try {
-    const s = await api("/students", { method: "POST", body: JSON.stringify(body) });
+    let s;
+    if (state.authed) {
+      // Authenticated writes go through the session-guarded endpoint, so the
+      // profile cannot be written on behalf of another student.
+      s = await api("/auth/update-profile", { method: "POST", body: JSON.stringify(body) });
+    } else {
+      s = await api("/students", { method: "POST", body: JSON.stringify(body) });
+    }
     setStudent(s.id, s);
-    alert("Profile saved — your recommendations are updated.");
+    toast("Profile saved — your recommendations are updated.", "ok");
     location.hash = "#/dashboard";
   } catch (err) {
-    alert("Could not save: " + err.message);
+    toast("Could not save: " + err.message);
     if (btn) { btn.disabled = false; btn.textContent = "Save profile"; }
   }
 }
@@ -501,7 +511,7 @@ function openDetail(id) {
 
 async function toggleSave(id) {
   if (!state.studentId) {
-    alert("Load or create a profile first so we know whose bookmarks these are.");
+    toast("Load or create a profile first so we know whose bookmarks these are.");
     return;
   }
   try {
@@ -510,10 +520,9 @@ async function toggleSave(id) {
       body: JSON.stringify({ studentId: state.studentId, opportunityId: id }),
     });
     state.results = state.results.map((o) => (o.id === id ? { ...o, saved: r.saved } : o));
-    const m = document.getElementById("modal");
-    if (m) m.remove();
+    document.getElementById("modal")?.remove();
     route();
-  } catch (e) { alert("Could not save: " + e.message); }
+  } catch (e) { toast("Could not save: " + e.message); }
 }
 
 /* ---------------------------------------------------------------- router */
@@ -543,9 +552,9 @@ document.addEventListener("click", async (e) => {
     try {
       const s = await api("/demo-profile", { method: "POST" });
       setStudent(s.id, s);
-      if (!location.hash) location.hash = "#/dashboard";
-      await route();
-    } catch (err) { alert("Demo failed: " + err.message); }
+      showApp();
+      toast("Exploring as Aarav Sharma — demo profile", "ok");
+    } catch (err) { toast("Demo failed: " + err.message); }
     return;
   }
 
@@ -606,20 +615,99 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("hashchange", route);
 
 /* ------------------------------------------------------------------ boot */
+// --- toast / auth shell (auth.js reuses these) ---
+let toastTimer;
+function toast(msg, tone = "error") {
+  const el = $("#toast");
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `pointer-events-none fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-lg border px-4 py-2.5 text-sm shadow-xl ${
+    tone === "ok"
+      ? "border-emerald-500/50 bg-emerald-950 text-emerald-200"
+      : "border-rose-500/50 bg-rose-950 text-rose-200"}`;
+  el.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add("hidden"), 4200);
+}
+
+function showApp() {
+  $("#nav").classList.remove("hidden");
+  $("#btn-logout").classList.remove("hidden");
+  location.hash = location.hash && location.hash !== "#/reset" ? location.hash : "#/discover";
+  route();
+}
+
+function showAuth() {
+  $("#nav").classList.add("hidden");
+  $("#btn-logout").classList.add("hidden");
+  $("#whoami").classList.add("hidden");
+  const hash = location.hash;
+  if (hash.startsWith("#/reset")) {
+    const token = new URLSearchParams(hash.split("?")[1] || "").get("token") || "";
+    A.mode = "reset";
+    view.innerHTML = "";
+    renderReset(token);
+  } else {
+    A.mode = A.mode || "landing";
+    paintAuth();
+  }
+}
+
+/** After a successful login/verify: adopt the session's student profile. */
+async function enterApp(user) {
+  if (user.studentId) {
+    const s = await api(`/students/${user.studentId}`);
+    setStudent(s.id, s);
+  }
+  showApp();
+  toast(`Signed in as ${user.name}`, "ok");
+}
+
+document.addEventListener("click", async (e) => {
+  if (e.target.closest("#btn-logout")) {
+    try {
+      await api("/auth/logout", { method: "POST" });
+      localStorage.removeItem("oh_student");
+      state.studentId = null;
+      state.profile = null;
+      A.mode = "landing";
+      showAuth();
+      toast("Logged out", "ok");
+    } catch (err) { toast(err.message); }
+  }
+});
+
 (async function boot() {
   try {
     state.meta = await api("/meta");
-    if (state.studentId) {
-      try { state.profile = await api(`/students/${state.studentId}`); setStudent(state.studentId, state.profile); }
-      catch (_) { state.studentId = null; localStorage.removeItem("oh_student"); }
+
+    // A reset link works even with no session.
+    if (location.hash.startsWith("#/reset")) { showAuth(); return; }
+
+    const me = await api("/auth/me");
+    if (me.authenticated && me.studentId) {
+      state.authed = true;
+      const s = await api(`/students/${me.studentId}`);
+      setStudent(s.id, s);
+      showApp();
+    } else if (state.studentId) {
+      // Returning demo/anonymous visitor with a cached profile id.
+      try {
+        state.profile = await api(`/students/${state.studentId}`);
+        setStudent(state.studentId, state.profile);
+        showApp();
+      } catch (_) {
+        state.studentId = null;
+        localStorage.removeItem("oh_student");
+        showAuth();
+      }
     } else {
-      seedDraft();
+      showAuth();
     }
-    await route();
   } catch (e) {
     view.innerHTML = `<div class="rounded-xl border border-rose-500/40 p-6 text-sm text-rose-300">
       Could not reach the API: ${esc(e.message)}</div>`;
   } finally {
-    $("#splash").remove();
+    $("#splash")?.remove();
   }
 })();
