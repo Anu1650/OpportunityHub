@@ -35,7 +35,11 @@ async function api(path, opts = {}) {
   if (!res.ok) {
     let msg = res.statusText;
     try { msg = (await res.json()).detail || msg; } catch (_) {}
-    throw new Error(msg);
+    // Carry the status so callers can branch on it (403 means "unverified
+    // account, a code was just resent" rather than a generic failure).
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
   }
   return res.status === 204 ? null : res.json();
 }

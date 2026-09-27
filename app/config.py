@@ -47,8 +47,17 @@ SEED_ON_START = os.environ.get("SEED_ON_START", "1") not in ("0", "false", "Fals
 # hammer the same search page.
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "60"))
 
-# Set to "1" once MONGODB_URI / GCP_PROJECT are configured, so the in-memory
-# fallback can never be used by accident in production.
+# Which backend to use: "auto" | "memory" | "mongo" | "firestore".
+# Explicit rather than implicit precedence -- previously a stray MONGODB_URI
+# silently shadowed GCP_PROJECT, which is very hard to debug on a deployed URL.
+#   auto      -> mongo if MONGODB_URI, else firestore if GCP_PROJECT, else memory
+#   memory    -> in-process, for local dev and tests only
+#   mongo     -> require MONGODB_URI
+#   firestore -> require GCP_PROJECT and cloud credentials
+DB_BACKEND = os.environ.get("DB_BACKEND", "auto").strip().lower()
+
+# Set to "1" once a database is configured, so the in-memory fallback can never
+# be used by accident in production (Cloud Run would lose data on every restart).
 REQUIRE_DB = os.environ.get("REQUIRE_DB", "0") not in ("0", "false", "False")
 
 CATEGORIES = [

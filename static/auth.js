@@ -230,7 +230,18 @@ document.addEventListener("submit", async (e) => {
         body: JSON.stringify({ email: fd.get("email"), password: fd.get("password") }),
       });
       await enterApp(r);
-    } catch (err) { toast(err.message); }
+    } catch (err) {
+      // 403 means the account exists but was never verified. The server has
+      // just emailed a fresh code, so route to the OTP screen rather than
+      // leaving the user stuck against a 409 signup and a 403 login.
+      if (err.status === 403) {
+        A.email = String(fd.get("email")).trim().toLowerCase();
+        A.emailSent = true;
+        setMode("otp");
+      } else {
+        toast(err.message);
+      }
+    }
   }
 
   if (form.id === "signupForm") {

@@ -223,8 +223,11 @@ def verify_otp(payload: VerifyOtpIn, response: Response):
 def resend_otp(payload: ForgotIn):
     store = get_store()
     email = str(payload.email).strip().lower()
-    if not store.auth_user_get(email):
+    record = store.auth_user_get(email)
+    if not record:
         raise HTTPException(404, "No account found for that email")
+    if record.get("verified"):
+        raise HTTPException(400, "That account is already verified — log in instead.")
     otp = _issue_otp(store, email)
     return {"emailSent": otp["sent"]}
 
@@ -239,7 +242,16 @@ def login(payload: LoginIn, response: Response):
     if not record or not auth.verify_password(payload.password, record.get("passwordHash", "")):
         raise HTTPException(401, "Incorrect email or password")
     if not record.get("verified"):
-        raise HTTPException(403, "Verify your email first, then log in.")
+        # Surface whether a code can be resent. Without this, an abandoned
+        # signup leaves the account permanently stuck: signup 409s, login 403s,
+        # and nothing on screen offers a way back in.
+        otp = _issue_otp(store, email)
+        raise HTTPException(
+            403,
+            "Verify your email first — we just sent you a new code."
+            if otp["sent"]
+            else "Verify your email first. We could not send a code; check the server logs.",
+        )
 
     _start_session(store, record, response)
     return {"ok": True, **_public_user(record)}

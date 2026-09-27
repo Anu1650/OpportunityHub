@@ -1,20 +1,24 @@
 """Storage layer.
 
-One interface, two implementations:
+One interface, three implementations, selected by config.DB_BACKEND:
 
   MemoryStore     -- local development, zero credentials, zero setup
-  FirestoreStore  -- production on Cloud Run, survives restarts
+  MongoStore      -- MongoDB / Atlas
+  FirestoreStore  -- Google Cloud Run with Application Default Credentials
 
-Both sit behind BaseStore, which layers a short-TTL cache in front of the
+All sit behind BaseStore, which layers a short-TTL cache in front of the
 opportunity collection. Listings are read-only reference data, so caching
 them keeps read volume near zero no matter how many judges browse.
 """
 
+import logging
 import threading
 import time
 from typing import Dict, List, Optional
 
 from . import config
+
+log = logging.getLogger("fitfest.store")
 
 
 def _norm(value) -> str:
@@ -455,22 +459,46 @@ _store: Optional[BaseStore] = None
 
 
 def get_store() -> BaseStore:
-    """Pick a backend from the environment.
+    """Build the configured backend.
 
-    MONGODB_URI wins if set, then GCP_PROJECT, otherwise in-memory. With
-    REQUIRE_DB=1 a missing configuration raises instead of silently falling
-    back to memory, which would look like data loss in production.
+    DB_BACKEND makes the choice explicit. In "auto" mode a stray MONGODB_URI
+    silently shadowed GCP_PROJECT, which is nearly impossible to diagnose from a
+    deployed URL, so the resolution is now logged rather than hidden.
     """
     global _store
-    if _store is None:
+    if _store is not None:
+        return _store
+
+    backend = config.DB_BACKEND
+    resolved = backend
+
+    if backend == "auto":
         if config.MONGODB_URI:
-            _store = MongoStore()
+            resolved = "mongo"
         elif config.GCP_PROJECT:
-            _store = FirestoreStore()
-        elif config.REQUIRE_DB:
-            raise RuntimeError(
-                "REQUIRE_DB is set but neither MONGODB_URI nor GCP_PROJECT is configured."
-            )
+            resolved = "firestore"
         else:
-            _store = MemoryStore()
+            resolved = "memory"
+    elif backend not in ("memory", "mongo", "firestore"):
+        raise RuntimeError(
+            f"DB_BACKEND={backend!r} is not valid. Use auto, memory, mongo or firestore."
+        )
+
+    if resolved == "mongo":
+        if not config.MONGODB_URI:
+            raise RuntimeError("DB_BACKEND=mongo but MONGODB_URI is empty.")
+        _store = MongoStore()
+    elif resolved == "firestore":
+        if not config.GCP_PROJECT:
+            raise RuntimeError("DB_BACKEND=firestore but GCP_PROJECT is empty.")
+        _store = FirestoreStore()
+    else:
+        if config.REQUIRE_DB:
+            raise RuntimeError(
+                f"REQUIRE_DB=1 but resolved backend is 'memory' (DB_BACKEND={backend!r}, "
+                "MONGODB_URI and GCP_PROJECT both unset). Configure a real database."
+            )
+        _store = MemoryStore()
+
+    log.info("store=%s (DB_BACKEND=%s resolved=%s)", type(_store).__name__, backend, resolved)
     return _store
