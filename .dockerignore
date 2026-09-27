@@ -15,6 +15,9 @@ tools/
 data/
 server.log
 server.err
+dbg.log
+dbg.err
+dbg.out
 tunnel.log
 tunnel.err
 public-url.txt

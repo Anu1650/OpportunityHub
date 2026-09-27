@@ -7,8 +7,14 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+
+# Runtime output. server.err contains OTP codes and session activity, so it
+# must never be committed.
 server.log
 server.err
+dbg.log
+dbg.err
+dbg.out
 tunnel.log
 tunnel.err
 public-url.txt
