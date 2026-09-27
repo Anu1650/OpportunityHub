@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from . import config
 from .models import BookmarkIn, StudentIn
-from .recommend import score_opportunity, skill_gap
+from .recommend import check_eligibility, score_opportunity, skill_gap
 from .seed_data import DEMO_STUDENT
 from .store import get_store
 
@@ -125,6 +125,7 @@ def list_opportunities(
     studentId: str = "",
     minScore: int = 0,
     includeExpired: bool = False,
+    eligibleOnly: bool = False,
     sort: str = Query("smart", pattern="^(smart|deadline|newest|relevance)$"),
     limit: int = Query(200, ge=1, le=500),
 ):
@@ -140,7 +141,10 @@ def list_opportunities(
             left = _days_left(o.get("deadline"))
             if left is not None and left < 0:
                 continue
-        rows.append(_decorate(o, profile, saved_ids))
+        row = _decorate(o, profile, saved_ids)
+        if eligibleOnly and row.get("eligible") is False:
+            continue
+        rows.append(row)
 
     if minScore:
         rows = [r for r in rows if (r.get("score") or 0) >= minScore]

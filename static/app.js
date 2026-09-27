@@ -19,7 +19,7 @@ const state = {
   studentId: localStorage.getItem("oh_student") || null,
   profile: null,
   meta: { categories: Object.keys(CATS), modes: Object.keys(MODES), tags: [] },
-  filters: { q: "", category: "", mode: "", skills: "", closing: "", minScore: 0, includeExpired: false },
+  filters: { q: "", category: "", mode: "", skills: "", closing: "", minScore: 0, includeExpired: false, eligibleOnly: false },
   results: [],
   detail: null,
   gap: [],
@@ -65,8 +65,9 @@ function scoreRing(score) {
 function oppCard(o) {
   const cat = CATS[o.category] || { icon: "📌", color: "bg-slate-500/15 text-slate-300 border-slate-500/30" };
   const reasons = (o.reasons || []).slice(0, 2);
+  const ineligible = o.eligible === false;
   return `
-  <article class="card rounded-xl border border-slate-800 bg-slate-900/60 p-4 hover:border-violet-500/50">
+  <article class="card rounded-xl border ${ineligible ? "border-slate-800/60 opacity-60" : "border-slate-800 bg-slate-900/60"} p-4 hover:border-violet-500/50">
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
@@ -84,7 +85,8 @@ function oppCard(o) {
 
     <p class="mt-2 line-clamp-2 text-sm text-slate-400">${esc(o.description)}</p>
 
-    ${reasons.length ? `<p class="mt-2 text-[11px] text-violet-300">${reasons.map(esc).join(" · ")}</p>` : ""}
+    ${ineligible ? `<p class="mt-2 text-[11px] text-amber-400">⚠ ${esc(o.eligibilityNote || "You may not be eligible")}</p>` : ""}
+    ${reasons.length && !ineligible ? `<p class="mt-2 text-[11px] text-violet-300">${reasons.map(esc).join(" · ")}</p>` : ""}
 
     <div class="mt-3 flex flex-wrap gap-1.5">
       ${(o.tags || []).slice(0, 6).map((t) => `<span class="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">${esc(t)}</span>`).join("")}
@@ -98,6 +100,22 @@ function oppCard(o) {
       }">${o.saved ? "★ Saved" : "☆ Save"}</button>
     </div>
   </article>`;
+}
+
+/* Skill-gap visual: proportional bars so relative impact is obvious at a glance. */
+function gapBars(items) {
+  if (!items.length) return "";
+  const max = Math.max(...items.map((g) => g.count)) || 1;
+  return `<div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">${items.map((g) => `
+    <div>
+      <div class="flex items-baseline justify-between text-[11px]">
+        <span class="font-semibold text-cyan-200">${esc(g.skill)}</span>
+        <span class="text-slate-400">${g.count} open</span>
+      </div>
+      <div class="mt-1 h-2 overflow-hidden rounded-full bg-slate-800">
+        <div class="h-full rounded-full bg-gradient-to-r from-cyan-500 to-violet-500" style="width:${Math.round((g.count / max) * 100)}%"></div>
+      </div>
+    </div>`).join("")}</div>`;
 }
 
 const skeletonGrid = () =>
@@ -145,6 +163,10 @@ async function renderDiscover() {
       <label class="flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300">
         <input id="f-expired" type="checkbox" ${f.includeExpired ? "checked" : ""} class="accent-violet-500" /> Show closed
       </label>
+      ${state.profile ? `
+      <label class="flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300">
+        <input id="f-eligible" type="checkbox" ${f.eligibleOnly ? "checked" : ""} class="accent-violet-500" /> Eligible only
+      </label>` : ""}
     </div>
 
     <div class="mt-3 flex flex-wrap gap-1.5">
@@ -174,6 +196,7 @@ async function renderDiscover() {
   if (f.closing) qs.set("closing", f.closing);
   if (f.minScore) qs.set("minScore", f.minScore);
   if (f.includeExpired) qs.set("includeExpired", "true");
+  if (f.eligibleOnly) qs.set("eligibleOnly", "true");
   if (state.studentId) qs.set("studentId", state.studentId);
 
   try {
@@ -203,13 +226,7 @@ async function renderGap() {
         <h3 class="font-semibold text-cyan-200">Skill-gap analysis</h3>
         <span class="text-xs text-slate-400">— skills that unlock the most open opportunities for you</span>
       </div>
-      <div class="mt-3 flex flex-wrap gap-2">
-        ${items.map((g) => `
-          <span class="rounded-lg border border-cyan-500/30 bg-slate-950/50 px-2.5 py-1.5 text-xs">
-            <span class="font-semibold text-cyan-200">${esc(g.skill)}</span>
-            <span class="ml-1 text-slate-400">${g.count} open</span>
-          </span>`).join("")}
-      </div>
+      ${gapBars(items)}
     </div>`;
   } catch (_) { /* non-critical */ }
 }
@@ -276,9 +293,7 @@ async function renderDashboard() {
   <div class="mt-4 rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-4">
     <h2 class="font-semibold text-cyan-200">📊 Learn next</h2>
     <p class="mt-1 text-xs text-slate-400">Skills you're missing that appear across the most open listings.</p>
-    <div class="mt-3 flex flex-wrap gap-2">
-      ${d.skillGap.map((g) => `<span class="rounded-lg border border-cyan-500/30 bg-slate-950/50 px-2.5 py-1.5 text-xs"><b class="text-cyan-200">${esc(g.skill)}</b> <span class="text-slate-400">${g.count} open</span></span>`).join("")}
-    </div>
+    ${gapBars(d.skillGap)}
   </div>` : ""}`;
 }
 
@@ -579,6 +594,7 @@ document.addEventListener("change", (e) => {
   if (e.target.id === "f-mode")     { state.filters.mode = e.target.value; renderDiscover(); }
   if (e.target.id === "f-closing")  { state.filters.closing = e.target.value; renderDiscover(); }
   if (e.target.id === "f-expired")  { state.filters.includeExpired = e.target.checked; renderDiscover(); }
+  if (e.target.id === "f-eligible") { state.filters.eligibleOnly = e.target.checked; renderDiscover(); }
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.id?.startsWith("in-")) {

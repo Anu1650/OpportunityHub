@@ -28,7 +28,7 @@ opportunities.
 | Brief's suggested feature | Implementation |
 |---|---|
 | 🎓 Student Profile | Education, degree, year, skills, interests, preferred categories |
-| 🔎 Search & Filtering | Full-text search, category, mode, closing-soon, min-match, show-closed |
+| 🔎 Search & Filtering | Full-text search, category, mode, closing-soon, min-match, eligible-only, show-closed |
 | 🏆 Hackathons & Competitions | 7 category types with per-category icons and colour coding |
 | 💼 Internships | Filterable, deadline-tracked, external apply links |
 | 📚 Courses & Certifications | 60+ real programmes, eligibility shown per listing |
@@ -36,7 +36,8 @@ opportunities.
 | 🔖 Save/Bookmark | Toggle save, dedicated Saved view sorted by deadline |
 | 📊 Student Dashboard | Open count, strong matches, closing this week, category breakdown |
 | 🔗 Details & External Links | Modal with full description, eligibility, tags, direct apply link |
-| ⭐ **Skill-gap analysis** | "Learn C++ → unlocks 11 open opportunities" |
+| ⭐ **Skill-gap analysis** | Proportional bars: "C++ ████████░░ — unlocks 11 open opportunities" |
+| ⭐ **Eligibility matching** | Year-of-study check per listing, with an **Eligible only** filter |
 
 Extras beyond the brief: **demo mode** (one-click sample profile), **match
 explanations**, **deadline countdowns**, and a browsable **OpenAPI docs** at `/docs`.
@@ -50,12 +51,19 @@ points = 3 × (matched skills)
        + 2 × (matched interests in tags)
        + 1 × (interest phrase found in the description, max 3)
        + 2 × (listing is in a category you follow)
+       + 3 × (you meet the listing's year-of-study requirement)
 
-score  = min(100, points / 15 × 100)      # 15 points = 100% match
+score  = min(100, points / 18 × 100)      # 18 points = 100% match
 ```
 
 Every score ships with the terms that produced it, e.g.
-*"87% — Matches your skills: JavaScript, Python, React · In a category you follow (hackathon)"*.
+*"89% — Matches your skills: JavaScript, Python, React · In a category you follow (hackathon) · Open to 3rd year and above — you qualify"*.
+
+**Eligibility matching** derives each listing's minimum year of study by parsing
+its human-readable eligibility line, so no extra column is maintained across the
+dataset. Ineligible listings lose 3 points, are dimmed in the UI with an explicit
+warning, and can be hidden with the **Eligible only** filter. Listings with no
+year restriction count as open to all, so they don't distort the ranking.
 
 **Skill-gap analysis** inverts the same data: it counts which unlisted skills
 appear across the most open listings, so it can tell you what to learn next.
@@ -185,6 +193,8 @@ Interactive docs: **`/docs`** · schema: `/openapi.json`
 │   ├── recommend.py      # scoring + skill-gap engine
 │   ├── seed_data.py      # 66 listings + rolling deadlines
 │   └── store.py          # MemoryStore / FirestoreStore + cache
+├── tests/
+│   └── test_eligibility.py   # parser unit tests
 ├── static/
 │   ├── index.html
 │   ├── app.js            # SPA: router, views, rendering
@@ -195,6 +205,16 @@ Interactive docs: **`/docs`** · schema: `/openapi.json`
 ├── run-tunnel.ps1
 └── README.md
 ```
+
+## Tests
+
+```bash
+.\.venv\Scripts\python.exe tests\test_eligibility.py
+```
+
+16 assertions covering year-of-study parsing and eligibility derivation,
+including the cases that are easy to get wrong: `"2nd-4th year"` (a range, so the
+minimum is 2), `"Final-year"`, and `"Postgraduate students only"`.
 
 ## Scope & limitations
 
