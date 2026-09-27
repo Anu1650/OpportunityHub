@@ -20,7 +20,7 @@ from .models import (
     VerifyOtpIn,
 )
 from .recommend import score_opportunity, skill_gap
-from .store import get_store
+from .store import get_store_resilient as get_store
 
 router = APIRouter(prefix="/api")
 log = logging.getLogger("fitfest.auth")

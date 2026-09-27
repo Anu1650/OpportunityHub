@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from app import config
 from app.api import router
 from app.seed_data import build_seed
-from app.store import get_store
+from app.store import degraded_reason, get_store_resilient
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger("fitfest")
@@ -36,8 +36,14 @@ app.include_router(router)
 
 @app.on_event("startup")
 def startup() -> None:
-    store = get_store()
+    # Resilient: a broken or unreachable database must not stop the site from
+    # serving, or a bad MONGODB_URI means a judge sees nothing at all.
+    store = get_store_resilient()
     log.info("store=%s", type(store).__name__)
+
+    degraded = degraded_reason()
+    if degraded:
+        log.error("RUNNING DEGRADED: the configured database failed -> %s", degraded)
 
     # The in-memory store is per-process. Multiple workers would each hold
     # their own copy, so a bookmark saved via one worker would be invisible
@@ -56,8 +62,16 @@ def startup() -> None:
 
 @app.get("/healthz")
 def healthz():
-    store = get_store()
-    return {"status": "ok", "store": type(store).__name__, "listings": store.count_opportunities()}
+    store = get_store_resilient()
+    degraded = degraded_reason()
+    return {
+        "status": "degraded" if degraded else "ok",
+        "store": type(store).__name__,
+        "listings": store.count_opportunities(),
+        "dbBackend": config.DB_BACKEND,
+        # Present so a broken database is visible rather than silent.
+        "degradedReason": degraded,
+    }
 
 
 if os.path.isdir(STATIC_DIR):

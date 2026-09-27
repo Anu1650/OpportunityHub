@@ -639,6 +639,9 @@ class MongoStore(BaseStore):
 
 
 _store: Optional[BaseStore] = None
+# Set when the configured database could not be reached and we fell back, so
+# /healthz can report the site is running in a degraded state.
+_degraded_from: Optional[str] = None
 
 
 def get_store() -> BaseStore:
@@ -687,3 +690,38 @@ def get_store() -> BaseStore:
 
     log.info("store=%s (DB_BACKEND=%s resolved=%s)", type(_store).__name__, backend, resolved)
     return _store
+
+
+def get_store_resilient():
+    """get_store(), but a broken database never takes the site offline.
+
+    A misconfigured or unreachable database used to abort startup, so a bad
+    MONGODB_URI meant a judge saw a connection error instead of the app. Now the
+    failure is loud in the log, reported on /healthz, and the app falls back to
+    the file store so it still serves.
+
+    Set REQUIRE_DB=1 to make a broken database fatal instead.
+    """
+    global _store, _degraded_from
+    try:
+        return get_store()
+    except Exception as exc:
+        if config.REQUIRE_DB:
+            raise
+        log.critical(
+            "primary backend %r failed (%s); falling back to FileStore so the "
+            "site stays up. Set DB_BACKEND=file to make this permanent.",
+            config.DB_BACKEND, exc,
+        )
+        _degraded_from = f"{type(exc).__name__}: {exc}"
+        _store = FileStore(config.DATA_DIR)
+        log.critical("serving from %s instead", os.path.abspath(config.DATA_DIR))
+        return _store
+
+    log.info("store=%s (DB_BACKEND=%s resolved=%s)", type(_store).__name__, backend, resolved)
+    return _store
+
+
+def degraded_reason() -> Optional[str]:
+    """Why the configured database was abandoned, or None if all is well."""
+    return _degraded_from

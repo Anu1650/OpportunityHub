@@ -1,0 +1,10 @@
+INFO:     Started server process [15068]
+INFO:     Waiting for application startup.
+CRITICAL primary backend 'mongo' failed (MongoDB connection failed: bad auth : authentication failed, full error: {'ok': 0, 'errmsg': 'bad auth : authentication failed', 'code': 8000, 'codeName': 'AtlasError'} -- wrong username or password. Atlas passwords are usually shown once; use 'Copy URI string' so it is URL-encoded correctly.); falling back to FileStore so the site stays up. Set DB_BACKEND=file to make this permanent.
+INFO file store at C:\Users\anike\OneDrive\Desktop\FIT-HACK\data
+CRITICAL serving from C:\Users\anike\OneDrive\Desktop\FIT-HACK\data instead
+INFO store=FileStore
+ERROR RUNNING DEGRADED: the configured database failed -> RuntimeError: MongoDB connection failed: bad auth : authentication failed, full error: {'ok': 0, 'errmsg': 'bad auth : authentication failed', 'code': 8000, 'codeName': 'AtlasError'} -- wrong username or password. Atlas passwords are usually shown once; use 'Copy URI string' so it is URL-encoded correctly.
+INFO seeded 0 listings (total 66)
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8080 (Press CTRL+C to quit)
