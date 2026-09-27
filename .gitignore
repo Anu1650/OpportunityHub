@@ -7,6 +7,8 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+server.log
+server.err
 
 # Never commit GCP credentials -- Cloud Run uses ADC, no key file is needed.
 *service-account*.json

@@ -1,4 +1,0 @@
-INFO:     127.0.0.1:52859 - "POST /api/students HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52859 - "GET /api/recommendations/stu0067 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52859 - "POST /api/demo-profile HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52859 - "GET /api/dashboard/stu0067 HTTP/1.1" 200 OK
