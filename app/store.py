@@ -34,6 +34,34 @@ def _next_object_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+def _mongo_help(exc: Exception) -> str:
+    """Translate MongoDB Atlas's opaque errors into something actionable.
+
+    Atlas failure modes are well known and all look like generic timeouts or
+    'bad auth', so naming the likely cause saves a lot of guessing.
+    """
+    text = str(exc).lower()
+    base = f"MongoDB connection failed: {exc}"
+
+    if "bad auth" in text or "auth failed" in text or "authentication" in text:
+        return base + (
+            " -- wrong username or password. Atlas passwords are usually shown "
+            "once; use 'Copy URI string' so it is URL-encoded correctly."
+        )
+    if "srv" in text and ("does not exist" in text or "resolve" in text):
+        return base + " -- the hostname is wrong or the cluster no longer exists."
+    if "timed out" in text or "server selection" in text:
+        return base + (
+            " -- timed out reaching the cluster. In Atlas: Network Access -> IP "
+            "Access List must include 0.0.0.0/0 (or this machine's IP), and a "
+            "free-tier M0 cluster pauses when idle, so the first request can take "
+            "a minute to wake it."
+        )
+    if "connection refused" in text or "network" in text:
+        return base + " -- check outbound connectivity to the Atlas host on port 27017."
+    return base
+
+
 def _norm_list(values) -> List[str]:
     """Dedupe + strip, preserving the author's capitalisation.
 
@@ -511,13 +539,37 @@ class MongoStore(BaseStore):
     def __init__(self) -> None:
         super().__init__()
         from pymongo import MongoClient
+        from pymongo.errors import ConfigurationError, ServerSelectionTimeoutError
 
-        # Server-selection timeouts kept short so a paused cluster surfaces as
-        # an error fast rather than hanging the request indefinitely.
+        if not config.MONGODB_URI:
+            raise RuntimeError("DB_BACKEND=mongo but MONGODB_URI is empty.")
+
+        if "<" in config.MONGODB_URI and ">" in config.MONGODB_URI:
+            raise RuntimeError(
+                "MONGODB_URI still contains Atlas placeholders such as <password> or "
+                "<dbname>. In Atlas use 'Copy URI string', then replace <password> with "
+                "the URL-encoded database password."
+            )
+
+        # Short timeouts so a paused cluster or a blocked IP fails fast with a
+        # useful message instead of hanging the request for 30 seconds.
         self._client = MongoClient(
-            config.MONGODB_URI, serverSelectionTimeoutMS=8000, connectTimeoutMS=8000
+            config.MONGODB_URI,
+            serverSelectionTimeoutMS=8000,
+            connectTimeoutMS=8000,
+            retryWrites=True,
         )
         self._db = self._client[config.MONGODB_DB]
+
+        # Force a real round trip now, so a misconfigured URI is reported at
+        # startup with an explanation rather than on a judge's first request.
+        try:
+            self._client.admin.command("ping")
+        except ServerSelectionTimeoutError as exc:
+            raise RuntimeError(_mongo_help(exc)) from exc
+        except Exception as exc:
+            raise RuntimeError(_mongo_help(exc)) from exc
+
         self.students = self._db["students"]
         self.opportunities = self._db["opportunities"]
         self.bookmarks = self._db["bookmarks"]

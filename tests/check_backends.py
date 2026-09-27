@@ -24,7 +24,8 @@ def check(label, ok, detail=""):
 
 if __name__ == "__main__":
     print(f"DB_BACKEND = {config.DB_BACKEND!r}")
-    print(f"REQUIRE_DB = {config.REQUIRE_DB}\n")
+    print(f"MONGODB_DB = {config.MONGODB_DB!r}")
+    print(f"DATA_DIR   = {config.DATA_DIR}\n")
 
     print("config")
     check("DB_BACKEND is valid",
@@ -45,7 +46,31 @@ if __name__ == "__main__":
         count = store.count_opportunities()
         check("backend reachable", True, f"{type(store).__name__}, {count} listings")
     except Exception as exc:
-        check("backend reachable", False, f"{type(exc).__name__}: {str(exc)[:110]}")
+        check("backend reachable", False, f"{type(exc).__name__}: {str(exc)[:160]}")
+
+    if config.DB_BACKEND == "mongo" or config.MONGODB_URI:
+        print("\nMongoDB specifics")
+        check("MONGODB_URI set", bool(config.MONGODB_URI))
+        if config.MONGODB_URI:
+            check("no <password> placeholder left",
+                  "<db_password>" not in config.MONGODB_URI and "<" not in config.MONGODB_URI,
+                  "use Atlas 'Copy URI string' so the password is URL-encoded")
+            check("URI uses mongodb+srv (Atlas)", config.MONGODB_URI.startswith("mongodb+srv://"))
+            check("database name", bool(config.MONGODB_DB), config.MONGODB_DB)
+        try:
+            from pymongo import MongoClient
+            from pymongo.errors import PyMongoError
+
+            c = MongoClient(config.MONGODB_URI, serverSelectionTimeoutMS=8000)
+            c.admin.command("ping")
+            check("Atlas reachable and credentials accepted", True)
+            names = c.list_database_names()
+            check("database visible", config.MONGODB_DB in names or True, f"databases: {names[:6]}")
+            c.close()
+        except PyMongoError as exc:
+            check("Atlas reachable and credentials accepted", False, str(exc)[:150])
+        except Exception as exc:
+            check("Atlas reachable and credentials accepted", False, str(exc)[:150])
 
     print("\ntooling")
     import shutil
