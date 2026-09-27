@@ -29,8 +29,11 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
 
 # Gmail SMTP for OTP verification and password reset.
-EMAIL_USER = os.environ.get("EMAIL_USER", "")
-EMAIL_PASS = os.environ.get("EMAIL_PASS", "")
+EMAIL_USER = os.environ.get("EMAIL_USER", "").strip()
+# Gmail shows app passwords as "abcd efgh ijkl mnop". Pasting it verbatim keeps
+# those spaces and makes SMTP auth fail with an opaque error, so internal
+# whitespace is stripped here.
+EMAIL_PASS = "".join(os.environ.get("EMAIL_PASS", "").split())
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "")
 
 OTP_TTL_MINUTES = int(os.environ.get("OTP_TTL_MINUTES", "10"))
